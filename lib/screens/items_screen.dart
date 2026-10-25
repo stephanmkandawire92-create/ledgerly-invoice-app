@@ -86,7 +86,10 @@ class _ItemsScreenState extends State<ItemsScreen> {
                           decoration: const InputDecoration(labelText: 'Unit Price *'),
                           validator: (v) {
                             if (v == null || v.trim().isEmpty) return 'Required';
-                            if (double.tryParse(v.trim()) == null) return 'Invalid price';
+                            final value = double.tryParse(v.trim());
+                            if (value == null || !value.isFinite || value < 0 || value > 1e12) {
+                              return 'Enter a valid non-negative price';
+                            }
                             return null;
                           },
                         ),
@@ -115,6 +118,13 @@ class _ItemsScreenState extends State<ItemsScreen> {
                           controller: taxCtrl,
                           keyboardType: const TextInputType.numberWithOptions(decimal: true),
                           decoration: const InputDecoration(labelText: 'Tax Rate (%)'),
+                          validator: (v) {
+                            final value = double.tryParse((v ?? '').trim());
+                            if (value == null || !value.isFinite || value < 0 || value > 100) {
+                              return 'Enter a tax rate from 0 to 100';
+                            }
+                            return null;
+                          },
                         ),
                       ),
                     ],
