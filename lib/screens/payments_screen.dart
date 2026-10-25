@@ -26,10 +26,12 @@ class _PaymentsScreenState extends State<PaymentsScreen> {
   final DocumentStore _store = DocumentStore();
   final Uuid _uuid = const Uuid();
 
-  List<BusinessDocument> get _invoices => widget.documents.where((d) {
-        if (d.kind != DocumentKind.invoice || d.status == 'Void' || d.status == 'Draft') return false;
-        final paid = _totalPaidForInvoice(d.id);
-        return paid + 0.004 < d.total;
+  List<BusinessDocument> get _invoices =>
+      widget.documents.where((d) => d.kind == DocumentKind.invoice).toList();
+
+  List<BusinessDocument> get _payableInvoices => _invoices.where((d) {
+        if (d.status == 'Void' || d.status == 'Draft') return false;
+        return _totalPaidForInvoice(d.id) + 0.004 < d.total;
       }).toList();
 
   double get _totalCollected =>
@@ -42,14 +44,16 @@ class _PaymentsScreenState extends State<PaymentsScreen> {
   }
 
   Future<void> _recordPaymentDialog({BusinessDocument? preselectedInvoice}) async {
-    if (_invoices.isEmpty) {
+    if (_payableInvoices.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Please create an invoice first before recording payments.')),
       );
       return;
     }
 
-    BusinessDocument selectedInvoice = preselectedInvoice ?? _invoices.first;
+    BusinessDocument selectedInvoice = _payableInvoices.any((d) => d.id == preselectedInvoice?.id)
+        ? preselectedInvoice!
+        : _payableInvoices.first;
     final paidSoFar = _totalPaidForInvoice(selectedInvoice.id);
     final remaining = (selectedInvoice.total - paidSoFar).clamp(0.0, double.infinity);
 
@@ -80,7 +84,7 @@ class _PaymentsScreenState extends State<PaymentsScreen> {
                       DropdownButtonFormField<BusinessDocument>(
                         initialValue: selectedInvoice,
                         decoration: const InputDecoration(labelText: 'Select Invoice *'),
-                        items: _invoices.map((inv) {
+                        items: _payableInvoices.map((inv) {
                           return DropdownMenuItem(
                             value: inv,
                             child: Text('${inv.number} - ${inv.clientName} (${inv.currencyCode} ${inv.total.toStringAsFixed(2)})'),
