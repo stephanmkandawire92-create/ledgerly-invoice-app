@@ -177,6 +177,10 @@ class _HomeScreenState extends State<HomeScreen> {
         items: _items,
         currencyCode: _profile.currencyCode,
         langCode: _lang,
+        existingNumbers: _documents
+            .where((doc) => doc.kind == kind && doc.id != existing?.id)
+            .map((doc) => doc.number.trim().toLowerCase())
+            .toList(),
       ),
     );
     if (result == null || !mounted) return;
@@ -1505,6 +1509,7 @@ class DocumentEditorDialog extends StatefulWidget {
     this.items = const [],
     required this.currencyCode,
     required this.langCode,
+    this.existingNumbers = const [],
   });
 
   final DocumentKind kind;
@@ -1514,6 +1519,7 @@ class DocumentEditorDialog extends StatefulWidget {
   final List<Item> items;
   final String currencyCode;
   final String langCode;
+  final List<String> existingNumbers;
 
   @override
   State<DocumentEditorDialog> createState() => _DocumentEditorDialogState();
@@ -1758,7 +1764,14 @@ class _DocumentEditorDialogState extends State<DocumentEditorDialog> {
                                     TextFormField(
                                       controller: _number,
                                       decoration: const InputDecoration(labelText: 'Document number'),
-                                      validator: (v) => v == null || v.trim().isEmpty ? 'Required' : null,
+                                      validator: (v) {
+                                        final value = v?.trim() ?? '';
+                                        if (value.isEmpty) return 'Required';
+                                        if (widget.existingNumbers.contains(value.toLowerCase())) {
+                                          return 'This document number is already in use';
+                                        }
+                                        return null;
+                                      },
                                     ),
                                     DropdownButtonFormField<String>(
                                       initialValue: _status,
@@ -1882,8 +1895,8 @@ class _DocumentEditorDialogState extends State<DocumentEditorDialog> {
                                               decoration: const InputDecoration(labelText: 'Quantity'),
                                               validator: (v) {
                                                 final n = double.tryParse(v ?? '');
-                                                return n == null || !n.isFinite || n <= 0
-                                                    ? 'Enter a quantity above zero'
+                                                return n == null || !n.isFinite || n <= 0 || n > 1e9
+                                                    ? 'Enter a quantity above zero (maximum 1,000,000,000)'
                                                     : null;
                                               },
                                               onChanged: (_) => setState(() {}),
@@ -1894,8 +1907,8 @@ class _DocumentEditorDialogState extends State<DocumentEditorDialog> {
                                               decoration: const InputDecoration(labelText: 'Unit price'),
                                               validator: (v) {
                                                 final n = double.tryParse(v ?? '');
-                                                return n == null || !n.isFinite || n < 0
-                                                    ? 'Enter zero or more'
+                                                return n == null || !n.isFinite || n < 0 || n > 1e12
+                                                    ? 'Enter a valid price (maximum 1,000,000,000,000)'
                                                     : null;
                                               },
                                               onChanged: (_) => setState(() {}),
