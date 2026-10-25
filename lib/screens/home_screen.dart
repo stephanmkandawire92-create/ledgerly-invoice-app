@@ -186,7 +186,7 @@ class _HomeScreenState extends State<HomeScreen> {
       ),
     );
     if (result == null || !mounted) return;
-    if (kind == DocumentKind.invoice && result.status != 'Void' && result.status != 'Draft') {
+    if (kind == DocumentKind.invoice && result.status != 'Void') {
       final paid = _payments.where((p) => p.invoiceId == result.id && p.amount.isFinite && p.amount > 0)
           .fold<double>(0, (sum, p) => sum + p.amount);
       if (paid > 0 && paid + 0.004 >= result.total) {
