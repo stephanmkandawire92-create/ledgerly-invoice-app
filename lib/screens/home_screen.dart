@@ -189,7 +189,7 @@ class _HomeScreenState extends State<HomeScreen> {
     if (kind == DocumentKind.invoice && result.status != 'Void' && result.status != 'Draft') {
       final paid = _payments.where((p) => p.invoiceId == result.id && p.amount.isFinite && p.amount > 0)
           .fold<double>(0, (sum, p) => sum + p.amount);
-      if (paid + 0.004 >= result.total) {
+      if (paid > 0 && paid + 0.004 >= result.total) {
         result.status = 'Paid';
       } else if (paid > 0) {
         result.status = 'Pending';
