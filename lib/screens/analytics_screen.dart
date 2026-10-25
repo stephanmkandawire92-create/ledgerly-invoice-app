@@ -17,17 +17,40 @@ class AnalyticsScreen extends StatelessWidget {
   final String currencyCode;
   final String langCode;
 
+  bool _isReportableInvoice(BusinessDocument d) =>
+      d.kind == DocumentKind.invoice &&
+      d.currencyCode.toUpperCase() == currencyCode.toUpperCase() &&
+      !['Void', 'Draft'].contains(d.status);
+
+  BusinessDocument? _invoiceForPayment(Payment payment) {
+    for (final document in documents) {
+      if (document.id == payment.invoiceId && document.kind == DocumentKind.invoice) return document;
+    }
+    return null;
+  }
+
+  double _paidForInvoice(String invoiceId) => payments
+      .where((p) => p.invoiceId == invoiceId && p.amount.isFinite && p.amount > 0)
+      .fold<double>(0, (sum, p) => sum + p.amount);
+
   double get _totalInvoiced => documents
-      .where((d) => d.kind == DocumentKind.invoice && d.status != 'Void')
+      .where(_isReportableInvoice)
       .fold(0.0, (sum, d) => sum + d.total);
 
-  double get _totalCollected =>
-      payments.fold(0.0, (sum, p) => sum + p.amount);
+  double get _totalCollected => payments.fold<double>(0, (sum, p) {
+        final invoice = _invoiceForPayment(p);
+        if (invoice == null || invoice.currencyCode.toUpperCase() != currencyCode.toUpperCase() ||
+            p.amount.isNaN || p.amount.isInfinite || p.amount <= 0) return sum;
+        return sum + p.amount;
+      });
 
-  double get _totalOutstanding => (_totalInvoiced - _totalCollected).clamp(0.0, double.infinity);
+  double get _totalOutstanding => documents.where(_isReportableInvoice).fold<double>(0, (sum, d) {
+        final remaining = (d.total - _paidForInvoice(d.id)).clamp(0.0, d.total).toDouble();
+        return sum + remaining;
+      });
 
   int get _overdueCount => documents
-      .where((d) => d.kind == DocumentKind.invoice && d.status == 'Overdue')
+      .where((d) => _isReportableInvoice(d) && d.status == 'Overdue')
       .length;
 
   int get _totalQuotes =>
@@ -42,7 +65,7 @@ class AnalyticsScreen extends StatelessWidget {
 
   Map<String, double> get _clientRevenueMap {
     final Map<String, double> map = {};
-    for (final doc in documents.where((d) => d.kind == DocumentKind.invoice && d.status != 'Void')) {
+    for (final doc in documents.where(_isReportableInvoice)) {
       final name = doc.clientName.trim().isEmpty ? 'Unnamed Client' : doc.clientName.trim();
       map[name] = (map[name] ?? 0.0) + doc.total;
     }
@@ -52,6 +75,11 @@ class AnalyticsScreen extends StatelessWidget {
   Map<String, double> get _paymentMethodMap {
     final Map<String, double> map = {};
     for (final p in payments) {
+      final invoice = _invoiceForPayment(p);
+      if (invoice == null ||
+          invoice.currencyCode.toUpperCase() != currencyCode.toUpperCase() ||
+          !p.amount.isFinite ||
+          p.amount <= 0) continue;
       map[p.method] = (map[p.method] ?? 0.0) + p.amount;
     }
     return map;
@@ -102,7 +130,7 @@ class AnalyticsScreen extends StatelessWidget {
                         value: CurrencyHelper.format(_totalInvoiced, currencyCode),
                         icon: Icons.trending_up_rounded,
                         color: const Color(0xFF4F46E5),
-                        caption: '${documents.where((d) => d.kind == DocumentKind.invoice).length} Invoices',
+                        caption: '${documents.where((d) => d.kind == DocumentKind.invoice && d.status != 'Void' && d.status != 'Draft' && d.currencyCode.toUpperCase() == currencyCode.toUpperCase()).length} Invoices',
                       ),
                       _AnalyticsCard(
                         title: 'Total Cash Collected',
