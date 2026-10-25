@@ -3,6 +3,7 @@ import 'package:intl/intl.dart';
 import 'package:uuid/uuid.dart';
 import '../models/business_document.dart';
 import '../models/payment.dart';
+import '../models/currency_helper.dart';
 import '../services/document_store.dart';
 
 class PaymentsScreen extends StatefulWidget {
@@ -28,24 +29,41 @@ class _PaymentsScreenState extends State<PaymentsScreen> {
   List<BusinessDocument> get _invoices =>
       widget.documents.where((d) => d.kind == DocumentKind.invoice).toList();
 
-  double get _totalCollected =>
-      widget.payments.fold(0.0, (sum, p) => sum + p.amount);
+  List<BusinessDocument> get _payableInvoices => _invoices.where((d) {
+        if (d.status == 'Void' || d.status == 'Draft') return false;
+        return _totalPaidForInvoice(d.id) + 0.004 < d.total;
+      }).toList();
+
+  String get _collectedSummary {
+    final totals = <String, double>{};
+    for (final payment in widget.payments) {
+      if (!payment.amount.isFinite || payment.amount <= 0) continue;
+      final currency = _currencyForInvoice(payment.invoiceId);
+      totals[currency] = (totals[currency] ?? 0) + payment.amount;
+    }
+    if (totals.isEmpty) return 'No payments yet';
+    return totals.entries
+        .map((entry) => CurrencyHelper.format(entry.value, entry.key))
+        .join(' • ');
+  }
 
   double _totalPaidForInvoice(String invoiceId) {
     return widget.payments
-        .where((p) => p.invoiceId == invoiceId)
+        .where((p) => p.invoiceId == invoiceId && p.amount.isFinite && p.amount > 0)
         .fold(0.0, (sum, p) => sum + p.amount);
   }
 
   Future<void> _recordPaymentDialog({BusinessDocument? preselectedInvoice}) async {
-    if (_invoices.isEmpty) {
+    if (_payableInvoices.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Please create an invoice first before recording payments.')),
       );
       return;
     }
 
-    BusinessDocument selectedInvoice = preselectedInvoice ?? _invoices.first;
+    BusinessDocument selectedInvoice = _payableInvoices.any((d) => d.id == preselectedInvoice?.id)
+        ? preselectedInvoice!
+        : _payableInvoices.first;
     final paidSoFar = _totalPaidForInvoice(selectedInvoice.id);
     final remaining = (selectedInvoice.total - paidSoFar).clamp(0.0, double.infinity);
 
@@ -76,7 +94,7 @@ class _PaymentsScreenState extends State<PaymentsScreen> {
                       DropdownButtonFormField<BusinessDocument>(
                         initialValue: selectedInvoice,
                         decoration: const InputDecoration(labelText: 'Select Invoice *'),
-                        items: _invoices.map((inv) {
+                        items: _payableInvoices.map((inv) {
                           return DropdownMenuItem(
                             value: inv,
                             child: Text('${inv.number} - ${inv.clientName} (${inv.currencyCode} ${inv.total.toStringAsFixed(2)})'),
@@ -103,9 +121,9 @@ class _PaymentsScreenState extends State<PaymentsScreen> {
                         child: Row(
                           mainAxisAlignment: MainAxisAlignment.spaceBetween,
                           children: [
-                            Text('Invoice Total: R ${selectedInvoice.total.toStringAsFixed(2)}'),
+                            Text('Invoice Total: ${CurrencyHelper.format(selectedInvoice.total, selectedInvoice.currencyCode)}'),
                             Text(
-                              'Remaining: R ${currentRemaining.toStringAsFixed(2)}',
+                              'Remaining: ${CurrencyHelper.format(currentRemaining, selectedInvoice.currencyCode)}',
                               style: const TextStyle(fontWeight: FontWeight.bold, color: Color(0xFFB54708)),
                             ),
                           ],
@@ -119,7 +137,10 @@ class _PaymentsScreenState extends State<PaymentsScreen> {
                         validator: (v) {
                           if (v == null || v.trim().isEmpty) return 'Amount required';
                           final val = double.tryParse(v.trim());
-                          if (val == null || val <= 0) return 'Enter valid amount';
+                          if (val == null || !val.isFinite || val <= 0) return 'Enter valid amount';
+                          if (val > currentRemaining + 0.004) {
+                            return 'Amount cannot exceed the remaining balance';
+                          }
                           return null;
                         },
                       ),
@@ -200,22 +221,28 @@ class _PaymentsScreenState extends State<PaymentsScreen> {
     );
 
     if (result == null) return;
+    final invoice = widget.documents.firstWhere((d) => d.id == result.invoiceId);
+    final originalStatus = invoice.status;
     final updatedPayments = List<Payment>.from(widget.payments)..add(result);
-    await _store.savePayments(updatedPayments);
-    widget.onPaymentsUpdated(updatedPayments);
-
-    // Auto-update invoice status if fully paid or partially paid
-    final inv = _invoices.firstWhere((i) => i.id == result.invoiceId);
-    final totalPaid = updatedPayments
-        .where((p) => p.invoiceId == inv.id)
-        .fold(0.0, (sum, p) => sum + p.amount);
-
-    if (totalPaid >= inv.total && inv.status != 'Paid') {
-      inv.status = 'Paid';
+    try {
+      _reconcileInvoiceStatus(invoice, updatedPayments);
+      await _store.savePayments(updatedPayments);
       await _store.save(widget.documents);
-    } else if (totalPaid > 0 && totalPaid < inv.total && inv.status == 'Draft') {
-      inv.status = 'Pending';
-      await _store.save(widget.documents);
+      if (!mounted) return;
+      widget.onPaymentsUpdated(updatedPayments);
+    } catch (_) {
+      invoice.status = originalStatus;
+      try {
+        await _store.savePayments(widget.payments);
+        await _store.save(widget.documents);
+      } catch (_) {
+        // Keep the original error visible; rollback is best effort with local storage.
+      }
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Payment could not be saved. Please check your records before trying again.')),
+        );
+      }
     }
   }
 
@@ -224,7 +251,7 @@ class _PaymentsScreenState extends State<PaymentsScreen> {
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('Delete Payment Record?'),
-        content: Text('Are you sure you want to delete payment of R ${payment.amount.toStringAsFixed(2)}?'),
+        content: Text('Are you sure you want to delete payment of ${CurrencyHelper.format(payment.amount, _currencyForInvoice(payment.invoiceId))}?'),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
@@ -241,8 +268,50 @@ class _PaymentsScreenState extends State<PaymentsScreen> {
 
     if (confirm != true) return;
     final updated = widget.payments.where((p) => p.id != payment.id).toList();
-    await _store.savePayments(updated);
-    widget.onPaymentsUpdated(updated);
+    BusinessDocument? invoice;
+    for (final document in widget.documents) {
+      if (document.id == payment.invoiceId) { invoice = document; break; }
+    }
+    final originalStatus = invoice?.status;
+    try {
+      if (invoice != null) _reconcileInvoiceStatus(invoice, updated);
+      await _store.savePayments(updated);
+      if (invoice != null) await _store.save(widget.documents);
+      if (!mounted) return;
+      widget.onPaymentsUpdated(updated);
+    } catch (_) {
+      if (invoice != null && originalStatus != null) invoice.status = originalStatus;
+      try {
+        await _store.savePayments(widget.payments);
+        await _store.save(widget.documents);
+      } catch (_) {
+        // Best-effort rollback; report the failure instead of pretending it succeeded.
+      }
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Payment deletion could not be saved. Please check your records.')),
+        );
+      }
+    }
+  }
+
+  String _currencyForInvoice(String invoiceId) {
+    for (final document in widget.documents) {
+      if (document.id == invoiceId) return document.currencyCode;
+    }
+    return 'ZAR';
+  }
+
+  void _reconcileInvoiceStatus(BusinessDocument invoice, List<Payment> payments) {
+    if (invoice.kind != DocumentKind.invoice || invoice.status == 'Void') return;
+    final paid = payments.where((p) => p.invoiceId == invoice.id && p.amount.isFinite && p.amount > 0).fold<double>(0, (sum, p) => sum + p.amount);
+    if (paid > 0 && paid + 0.004 >= invoice.total) {
+      invoice.status = 'Paid';
+    } else if (paid > 0) {
+      invoice.status = 'Pending';
+    } else if (invoice.status == 'Paid' || invoice.status == 'Pending') {
+      invoice.status = invoice.dueDate.isBefore(DateTime.now()) ? 'Overdue' : 'Sent';
+    }
   }
 
   @override
@@ -295,7 +364,7 @@ class _PaymentsScreenState extends State<PaymentsScreen> {
                             const Text('Total Payments Recorded', style: TextStyle(color: Color(0xFF7B8497))),
                             const SizedBox(height: 4),
                             Text(
-                              'R ${_totalCollected.toStringAsFixed(2)}',
+                              _collectedSummary,
                               style: const TextStyle(
                                 fontSize: 24,
                                 fontWeight: FontWeight.bold,
@@ -386,7 +455,7 @@ class _PaymentsScreenState extends State<PaymentsScreen> {
                           child: const Icon(Icons.check, size: 20),
                         ),
                         title: Text(
-                          'R ${p.amount.toStringAsFixed(2)} - ${p.method}',
+                          '${CurrencyHelper.format(p.amount, matchingInv.currencyCode)} - ${p.method}',
                           style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
                         ),
                         subtitle: Column(

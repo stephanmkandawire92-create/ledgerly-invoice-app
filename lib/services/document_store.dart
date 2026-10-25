@@ -13,95 +13,78 @@ class DocumentStore {
   static const _paymentsKey = 'ledgerly.payments.v1';
   static const _profileKey = 'ledgerly.profile.v1';
 
-  // Documents
+  static const _allKeys = [
+    _storageKey,
+    _customersKey,
+    _itemsKey,
+    _paymentsKey,
+    _profileKey,
+  ];
+
+  // A decoding error must reach the caller. Returning an empty collection here
+  // makes damaged data look like a new workspace and risks overwriting it.
   Future<List<BusinessDocument>> load() async {
     final prefs = await SharedPreferences.getInstance();
     final source = prefs.getString(_storageKey);
     if (source == null || source.trim().isEmpty) return [];
-    try {
-      return BusinessDocument.decodeList(source);
-    } catch (_) {
-      return [];
-    }
+    return BusinessDocument.decodeList(source);
   }
 
   Future<void> save(List<BusinessDocument> documents) async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(
-      _storageKey,
-      jsonEncode(documents.map((document) => document.toJson()).toList()),
-    );
+    await _write(_storageKey, jsonEncode(documents.map((d) => d.toJson()).toList()));
   }
 
-  // Customers
   Future<List<Customer>> loadCustomers() async {
     final prefs = await SharedPreferences.getInstance();
     final source = prefs.getString(_customersKey);
     if (source == null || source.trim().isEmpty) return [];
-    try {
-      return Customer.decodeList(source);
-    } catch (_) {
-      return [];
-    }
+    return Customer.decodeList(source);
   }
 
   Future<void> saveCustomers(List<Customer> customers) async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(_customersKey, Customer.encodeList(customers));
+    await _write(_customersKey, Customer.encodeList(customers));
   }
 
-  // Items / Inventory
   Future<List<Item>> loadItems() async {
     final prefs = await SharedPreferences.getInstance();
     final source = prefs.getString(_itemsKey);
     if (source == null || source.trim().isEmpty) return [];
-    try {
-      return Item.decodeList(source);
-    } catch (_) {
-      return [];
-    }
+    return Item.decodeList(source);
   }
 
   Future<void> saveItems(List<Item> items) async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(_itemsKey, Item.encodeList(items));
+    await _write(_itemsKey, Item.encodeList(items));
   }
 
-  // Payments
   Future<List<Payment>> loadPayments() async {
     final prefs = await SharedPreferences.getInstance();
     final source = prefs.getString(_paymentsKey);
     if (source == null || source.trim().isEmpty) return [];
-    try {
-      return Payment.decodeList(source);
-    } catch (_) {
-      return [];
-    }
+    return Payment.decodeList(source);
   }
 
   Future<void> savePayments(List<Payment> payments) async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(_paymentsKey, Payment.encodeList(payments));
+    await _write(_paymentsKey, Payment.encodeList(payments));
   }
 
-  // Business Profile
   Future<BusinessProfile> loadProfile() async {
     final prefs = await SharedPreferences.getInstance();
     final source = prefs.getString(_profileKey);
     if (source == null || source.trim().isEmpty) return BusinessProfile();
-    try {
-      return BusinessProfile.decode(source);
-    } catch (_) {
-      return BusinessProfile();
-    }
+    return BusinessProfile.decode(source);
   }
 
   Future<void> saveProfile(BusinessProfile profile) async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(_profileKey, profile.encode());
+    await _write(_profileKey, profile.encode());
   }
 
-  // Backup & Export / Import
+  Future<void> _write(String key, String value) async {
+    final prefs = await SharedPreferences.getInstance();
+    if (!await prefs.setString(key, value)) {
+      throw StateError('Could not persist Ledgerly data for key: $key');
+    }
+  }
+
   Future<String> exportBackup() async {
     final docs = await load();
     final customers = await loadCustomers();
@@ -122,30 +105,105 @@ class DocumentStore {
   }
 
   Future<void> importBackup(String jsonSource) async {
-    final Map<String, dynamic> data = jsonDecode(jsonSource) as Map<String, dynamic>;
-    if (data.containsKey('documents')) {
-      final List<dynamic> docList = data['documents'] as List<dynamic>;
-      final docs = docList.map((e) => BusinessDocument.fromJson(e as Map<String, dynamic>)).toList();
-      await save(docs);
+    // Parse and validate every section before writing any live data.
+    final decoded = jsonDecode(jsonSource);
+    if (decoded is! Map<String, dynamic>) {
+      throw const FormatException('Backup must be a JSON object.');
     }
-    if (data.containsKey('customers')) {
-      final List<dynamic> list = data['customers'] as List<dynamic>;
-      final customers = list.map((e) => Customer.fromJson(e as Map<String, dynamic>)).toList();
-      await saveCustomers(customers);
+    final data = decoded;
+    if (data['version'] != 1) {
+      throw const FormatException('Unsupported or missing backup version.');
     }
-    if (data.containsKey('items')) {
-      final List<dynamic> list = data['items'] as List<dynamic>;
-      final items = list.map((e) => Item.fromJson(e as Map<String, dynamic>)).toList();
-      await saveItems(items);
+    for (final key in ['documents', 'customers', 'items', 'payments', 'profile']) {
+      if (!data.containsKey(key)) {
+        throw FormatException('Backup is missing required section: $key');
+      }
     }
-    if (data.containsKey('payments')) {
-      final List<dynamic> list = data['payments'] as List<dynamic>;
-      final payments = list.map((e) => Payment.fromJson(e as Map<String, dynamic>)).toList();
-      await savePayments(payments);
+
+    List<T> decodeList<T>(
+      Object? value,
+      T Function(Map<String, dynamic>) decode,
+      String section,
+    ) {
+      if (value is! List) throw FormatException('Backup section "$section" must be a list.');
+      return value.map((entry) {
+        if (entry is! Map<String, dynamic>) {
+          throw FormatException('Backup section "$section" contains an invalid record.');
+        }
+        return decode(entry);
+      }).toList();
     }
-    if (data.containsKey('profile')) {
-      final profile = BusinessProfile.fromJson(data['profile'] as Map<String, dynamic>);
-      await saveProfile(profile);
+
+    final docs = decodeList(data['documents'], BusinessDocument.fromJson, 'documents');
+    final customers = decodeList(data['customers'], Customer.fromJson, 'customers');
+    final items = decodeList(data['items'], Item.fromJson, 'items');
+    final payments = decodeList(data['payments'], Payment.fromJson, 'payments');
+    if (data['profile'] is! Map<String, dynamic>) {
+      throw const FormatException('Backup profile section is invalid.');
+    }
+    final profile = BusinessProfile.fromJson(data['profile'] as Map<String, dynamic>);
+
+    _ensureUniqueIds(docs.map((e) => e.id), 'documents');
+    _ensureUniqueIds(customers.map((e) => e.id), 'customers');
+    _ensureUniqueIds(items.map((e) => e.id), 'items');
+    _ensureUniqueIds(payments.map((e) => e.id), 'payments');
+    if (docs.any((d) =>
+        !d.taxPercent.isFinite || d.taxPercent < 0 || d.taxPercent > 100 ||
+        !d.discount.isFinite || d.discount < 0 ||
+        d.lines.any((line) =>
+            !line.quantity.isFinite || line.quantity <= 0 || line.quantity > 1e9 ||
+            !line.unitPrice.isFinite || line.unitPrice < 0 || line.unitPrice > 1e12))) {
+      throw const FormatException('Backup contains invalid invoice or quote amounts.');
+    }
+    if (items.any((item) =>
+        !item.unitPrice.isFinite || item.unitPrice < 0 || item.unitPrice > 1e12 ||
+        !item.taxRate.isFinite || item.taxRate < 0 || item.taxRate > 100)) {
+      throw const FormatException('Backup contains invalid catalogue prices or tax rates.');
+    }
+    if (payments.any((payment) => !payment.amount.isFinite || payment.amount <= 0)) {
+      throw const FormatException('Backup contains invalid payment amounts.');
+    }
+    final invoiceIds = docs.where((d) => d.kind == DocumentKind.invoice).map((d) => d.id).toSet();
+    if (payments.any((p) => !invoiceIds.contains(p.invoiceId))) {
+      throw const FormatException('Backup contains a payment linked to a missing invoice.');
+    }
+
+    final values = <String, String>{
+      _storageKey: BusinessDocument.encodeList(docs),
+      _customersKey: Customer.encodeList(customers),
+      _itemsKey: Item.encodeList(items),
+      _paymentsKey: Payment.encodeList(payments),
+      _profileKey: profile.encode(),
+    };
+
+    final prefs = await SharedPreferences.getInstance();
+    final oldValues = <String, String?>{
+      for (final key in _allKeys) key: prefs.getString(key),
+    };
+    try {
+      for (final entry in values.entries) {
+        if (!await prefs.setString(entry.key, entry.value)) {
+          throw StateError('Could not restore backup section: ${entry.key}');
+        }
+      }
+    } catch (_) {
+      // Best-effort rollback to the previous stored values if any write fails.
+      for (final key in _allKeys) {
+        final previous = oldValues[key];
+        if (previous == null) {
+          await prefs.remove(key);
+        } else {
+          await prefs.setString(key, previous);
+        }
+      }
+      rethrow;
+    }
+  }
+
+  void _ensureUniqueIds(Iterable<String> ids, String section) {
+    final values = ids.toList();
+    if (values.any((id) => id.trim().isEmpty) || values.toSet().length != values.length) {
+      throw FormatException('Backup contains missing or duplicate IDs in "$section".');
     }
   }
 }

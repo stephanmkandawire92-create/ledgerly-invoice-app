@@ -2,6 +2,11 @@ import 'dart:convert';
 
 enum DocumentKind { invoice, quote }
 
+double _roundMoney(double value) {
+  if (!value.isFinite) return 0.0;
+  return (value * 100).roundToDouble() / 100;
+}
+
 class DocumentLine {
   DocumentLine({
     required this.id,
@@ -15,7 +20,11 @@ class DocumentLine {
   double quantity;
   double unitPrice;
 
-  double get amount => quantity * unitPrice;
+  double get amount {
+    final safeQuantity = quantity.isFinite ? quantity.clamp(0.0, 1e9).toDouble() : 0.0;
+    final safePrice = unitPrice.isFinite ? unitPrice.clamp(0.0, 1e12).toDouble() : 0.0;
+    return _roundMoney(safeQuantity * safePrice);
+  }
 
   Map<String, dynamic> toJson() => {
         'id': id,
@@ -65,15 +74,21 @@ class BusinessDocument {
   String notes;
   String customerId;
 
-  double get subtotal => lines.fold<double>(0, (sum, line) {
-        final quantity = line.quantity.isFinite ? line.quantity.clamp(0, 1e9).toDouble() : 0.0;
-        final price = line.unitPrice.isFinite ? line.unitPrice.clamp(0, 1e12).toDouble() : 0.0;
-        return sum + quantity * price;
-      });
+  // Keep the same safe line amount for the editor, invoice totals, and PDF.
+  // Monetary totals are rounded to cents at each documented calculation stage.
+  double get subtotal => _roundMoney(lines.fold<double>(0, (sum, line) => sum + line.amount));
 
-  double get taxableAmount => (subtotal - discount).clamp(0, double.infinity).toDouble();
-  double get taxAmount => taxableAmount * taxPercent.clamp(0, 100).toDouble() / 100;
-  double get total => taxableAmount + taxAmount;
+  double get safeDiscount {
+    if (!discount.isFinite || discount <= 0) return 0;
+    return _roundMoney(discount.clamp(0.0, subtotal).toDouble());
+  }
+
+  double get safeTaxPercent =>
+      taxPercent.isFinite ? taxPercent.clamp(0.0, 100.0).toDouble() : 0.0;
+
+  double get taxableAmount => _roundMoney((subtotal - safeDiscount).clamp(0.0, double.infinity).toDouble());
+  double get taxAmount => _roundMoney(taxableAmount * safeTaxPercent / 100);
+  double get total => _roundMoney(taxableAmount + taxAmount);
 
   Map<String, dynamic> toJson() => {
         'id': id,
@@ -86,8 +101,8 @@ class BusinessDocument {
         'status': status,
         'currencyCode': currencyCode,
         'lines': lines.map((line) => line.toJson()).toList(),
-        'taxPercent': taxPercent,
-        'discount': discount,
+        'taxPercent': safeTaxPercent,
+        'discount': safeDiscount,
         'notes': notes,
         'customerId': customerId,
       };
@@ -105,22 +120,35 @@ class BusinessDocument {
         dueDate: DateTime.tryParse(json['dueDate'] as String? ?? '') ?? DateTime.now(),
         status: json['status'] as String? ?? 'Draft',
         currencyCode: json['currencyCode'] as String? ?? 'ZAR',
-        lines: (json['lines'] as List<dynamic>? ?? [])
-            .whereType<Map<String, dynamic>>()
-            .map(DocumentLine.fromJson)
-            .toList(),
+        lines: _decodeLines(json['lines']),
         taxPercent: (json['taxPercent'] as num?)?.toDouble() ?? 0,
         discount: (json['discount'] as num?)?.toDouble() ?? 0,
         notes: json['notes'] as String? ?? '',
         customerId: json['customerId'] as String? ?? '',
       );
 
+  static List<DocumentLine> _decodeLines(Object? value) {
+    if (value == null) return [];
+    if (value is! List) throw const FormatException('Document lines must be a list.');
+    return value.map((entry) {
+      if (entry is! Map<String, dynamic>) {
+        throw const FormatException('Document contains an invalid line item.');
+      }
+      return DocumentLine.fromJson(entry);
+    }).toList();
+  }
+
   static String encodeList(List<BusinessDocument> documents) =>
       jsonEncode(documents.map((document) => document.toJson()).toList());
 
-  static List<BusinessDocument> decodeList(String source) =>
-      (jsonDecode(source) as List<dynamic>)
-          .whereType<Map<String, dynamic>>()
-          .map(BusinessDocument.fromJson)
-          .toList();
+  static List<BusinessDocument> decodeList(String source) {
+    final decoded = jsonDecode(source);
+    if (decoded is! List) throw const FormatException('Saved documents must be a JSON list.');
+    return decoded.map((entry) {
+      if (entry is! Map<String, dynamic>) {
+        throw const FormatException('Saved documents contain an invalid record.');
+      }
+      return BusinessDocument.fromJson(entry);
+    }).toList();
+  }
 }
