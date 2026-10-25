@@ -96,16 +96,18 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
-  Future<void> _persist() async {
+  Future<bool> _persist() async {
     try {
       await _store.save(_documents);
       if (mounted) setState(() => _loadError = null);
+      return true;
     } catch (_) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Could not save to this device. Check available storage and try again.')),
         );
       }
+      return false;
     }
   }
 
@@ -189,6 +191,7 @@ class _HomeScreenState extends State<HomeScreen> {
         result.status = result.dueDate.isBefore(DateTime.now()) ? 'Overdue' : 'Sent';
       }
     }
+    final previousDocuments = List<BusinessDocument>.from(_documents);
     setState(() {
       final index = _documents.indexWhere((doc) => doc.id == result.id);
       if (index >= 0) {
@@ -197,7 +200,13 @@ class _HomeScreenState extends State<HomeScreen> {
         _documents.add(result);
       }
     });
-    await _persist();
+    final saved = await _persist();
+    if (!saved && mounted) {
+      setState(() {
+        _documents = previousDocuments;
+      });
+      return;
+    }
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('${kind == DocumentKind.invoice ? 'Invoice' : 'Quote'} saved on this device.')),
@@ -637,6 +646,8 @@ class _HomeScreenState extends State<HomeScreen> {
       ),
     );
     if (confirm != true || !mounted) return;
+    final previousDocuments = List<BusinessDocument>.from(_documents);
+    final previousPayments = List<Payment>.from(_payments);
     setState(() {
       _documents.removeWhere((item) => item.id == doc.id);
       if (doc.kind == DocumentKind.invoice) {
@@ -647,9 +658,19 @@ class _HomeScreenState extends State<HomeScreen> {
       await _store.save(_documents);
       await _store.savePayments(_payments);
     } catch (_) {
+      setState(() {
+        _documents = previousDocuments;
+        _payments = previousPayments;
+      });
+      try {
+        await _store.save(_documents);
+        await _store.savePayments(_payments);
+      } catch (_) {
+        // Best-effort rollback; the failure notification below is intentional.
+      }
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('The document deletion could not be fully saved. Check your records before continuing.')),
+          const SnackBar(content: Text('The document deletion could not be saved. Your previous records were restored where possible.')),
         );
       }
     }
