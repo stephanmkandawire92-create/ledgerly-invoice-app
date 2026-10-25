@@ -34,8 +34,18 @@ class _PaymentsScreenState extends State<PaymentsScreen> {
         return _totalPaidForInvoice(d.id) + 0.004 < d.total;
       }).toList();
 
-  double get _totalCollected =>
-      widget.payments.fold(0.0, (sum, p) => sum + p.amount);
+  String get _collectedSummary {
+    final totals = <String, double>{};
+    for (final payment in widget.payments) {
+      if (!payment.amount.isFinite || payment.amount <= 0) continue;
+      final currency = _currencyForInvoice(payment.invoiceId);
+      totals[currency] = (totals[currency] ?? 0) + payment.amount;
+    }
+    if (totals.isEmpty) return 'No payments yet';
+    return totals.entries
+        .map((entry) => CurrencyHelper.format(entry.value, entry.key))
+        .join(' • ');
+  }
 
   double _totalPaidForInvoice(String invoiceId) {
     return widget.payments
@@ -338,7 +348,7 @@ class _PaymentsScreenState extends State<PaymentsScreen> {
                             const Text('Total Payments Recorded', style: TextStyle(color: Color(0xFF7B8497))),
                             const SizedBox(height: 4),
                             Text(
-                              'R ${_totalCollected.toStringAsFixed(2)}',
+                              _collectedSummary,
                               style: const TextStyle(
                                 fontSize: 24,
                                 fontWeight: FontWeight.bold,
