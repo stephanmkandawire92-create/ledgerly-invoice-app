@@ -53,8 +53,11 @@ class _CustomersScreenState extends State<CustomersScreen> {
   double _totalBilledForCustomer(Customer customer) {
     return widget.documents
         .where((doc) =>
-            doc.customerId == customer.id ||
-            doc.clientName.toLowerCase() == customer.name.toLowerCase())
+            doc.kind == DocumentKind.invoice &&
+            doc.currencyCode.toUpperCase() == 'ZAR' &&
+            !['Void', 'Draft'].contains(doc.status) &&
+            (doc.customerId == customer.id ||
+                doc.clientName.trim().toLowerCase() == customer.name.trim().toLowerCase()))
         .fold(0.0, (sum, doc) => sum + doc.total);
   }
 
