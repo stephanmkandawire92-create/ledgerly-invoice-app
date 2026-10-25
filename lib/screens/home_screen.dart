@@ -158,6 +158,12 @@ class _HomeScreenState extends State<HomeScreen> {
       .fold(0, (sum, doc) => sum + doc.total);
 
   Future<void> _createDocument(DocumentKind kind, {BusinessDocument? existing}) async {
+    if (_loadError != null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Resolve the local data issue before creating or changing records.')),
+      );
+      return;
+    }
     final result = await showDialog<BusinessDocument>(
       context: context,
       barrierDismissible: false,
