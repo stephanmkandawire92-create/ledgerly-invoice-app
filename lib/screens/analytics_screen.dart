@@ -40,7 +40,9 @@ class AnalyticsScreen extends StatelessWidget {
   double get _totalCollected => payments.fold<double>(0, (sum, p) {
         final invoice = _invoiceForPayment(p);
         if (invoice == null || invoice.currencyCode.toUpperCase() != currencyCode.toUpperCase() ||
-            p.amount.isNaN || p.amount.isInfinite || p.amount <= 0) return sum;
+            p.amount.isNaN || p.amount.isInfinite || p.amount <= 0) {
+          return sum;
+        }
         return sum + p.amount;
       });
 
@@ -79,7 +81,9 @@ class AnalyticsScreen extends StatelessWidget {
       if (invoice == null ||
           invoice.currencyCode.toUpperCase() != currencyCode.toUpperCase() ||
           !p.amount.isFinite ||
-          p.amount <= 0) continue;
+          p.amount <= 0) {
+        continue;
+      }
       map[p.method] = (map[p.method] ?? 0.0) + p.amount;
     }
     return map;
