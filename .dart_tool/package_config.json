@@ -530,8 +530,32 @@
       "languageVersion": "3.5"
     },
     {
+      "name": "url_launcher",
+      "rootUri": "file:///C:/Users/Steph/AppData/Local/Pub/Cache/hosted/pub.dev/url_launcher-6.3.3",
+      "packageUri": "lib/",
+      "languageVersion": "3.11"
+    },
+    {
+      "name": "url_launcher_android",
+      "rootUri": "file:///C:/Users/Steph/AppData/Local/Pub/Cache/hosted/pub.dev/url_launcher_android-6.3.33",
+      "packageUri": "lib/",
+      "languageVersion": "3.12"
+    },
+    {
+      "name": "url_launcher_ios",
+      "rootUri": "file:///C:/Users/Steph/AppData/Local/Pub/Cache/hosted/pub.dev/url_launcher_ios-6.4.2",
+      "packageUri": "lib/",
+      "languageVersion": "3.10"
+    },
+    {
       "name": "url_launcher_linux",
       "rootUri": "file:///C:/Users/Steph/AppData/Local/Pub/Cache/hosted/pub.dev/url_launcher_linux-3.2.3",
+      "packageUri": "lib/",
+      "languageVersion": "3.10"
+    },
+    {
+      "name": "url_launcher_macos",
+      "rootUri": "file:///C:/Users/Steph/AppData/Local/Pub/Cache/hosted/pub.dev/url_launcher_macos-3.2.6",
       "packageUri": "lib/",
       "languageVersion": "3.10"
     },

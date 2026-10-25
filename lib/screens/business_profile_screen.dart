@@ -6,6 +6,9 @@ import '../models/business_profile.dart';
 import '../models/currency_helper.dart';
 import '../services/app_translations.dart';
 import '../services/document_store.dart';
+import '../services/subscription_service.dart';
+import 'paywall_screen.dart';
+import 'paypal_config_screen.dart';
 
 class BusinessProfileScreen extends StatefulWidget {
   const BusinessProfileScreen({
@@ -596,6 +599,115 @@ class _BusinessProfileScreenState extends State<BusinessProfileScreen> {
                         ],
                       ),
                     ],
+                  ),
+                ),
+              ),
+              const SizedBox(height: 20),
+              // Ledgerly Pro & PayPal Subscription
+              Card(
+                child: Padding(
+                  padding: const EdgeInsets.all(24),
+                  child: ListenableBuilder(
+                    listenable: SubscriptionService.instance,
+                    builder: (context, _) {
+                      final isPro = SubscriptionService.instance.isPro;
+                      final plan = SubscriptionService.instance.planType;
+                      final subId = SubscriptionService.instance.subscriptionId;
+
+                      return Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              Row(
+                                children: [
+                                  Container(
+                                    padding: const EdgeInsets.all(8),
+                                    decoration: BoxDecoration(
+                                      color: isPro ? const Color(0xFFFEF3C7) : const Color(0xFFEEF2FF),
+                                      borderRadius: BorderRadius.circular(10),
+                                    ),
+                                    child: Icon(
+                                      Icons.workspace_premium_rounded,
+                                      color: isPro ? const Color(0xFFD97706) : const Color(0xFF4F46E5),
+                                      size: 22,
+                                    ),
+                                  ),
+                                  const SizedBox(width: 12),
+                                  Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      const Text(
+                                        'Ledgerly Pro & Subscriptions',
+                                        style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                                      ),
+                                      Text(
+                                        isPro ? 'Active Plan: ${plan?.toUpperCase() ?? 'PRO'}' : 'Currently on Free Tier (5 Docs limit)',
+                                        style: TextStyle(
+                                          fontSize: 12,
+                                          fontWeight: FontWeight.w600,
+                                          color: isPro ? const Color(0xFF10B981) : const Color(0xFF7B8497),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ],
+                              ),
+                              if (isPro)
+                                Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                                  decoration: BoxDecoration(
+                                    color: const Color(0xFF10B981).withValues(alpha: 0.15),
+                                    borderRadius: BorderRadius.circular(12),
+                                    border: Border.all(color: const Color(0xFF10B981)),
+                                  ),
+                                  child: const Text(
+                                    'ACTIVE',
+                                    style: TextStyle(color: Color(0xFF10B981), fontWeight: FontWeight.bold, fontSize: 11),
+                                  ),
+                                ),
+                            ],
+                          ),
+                          const SizedBox(height: 12),
+                          const Text(
+                            'Pro unlocks unlimited quotes & invoices, watermark-free PDF exports, and detailed analytics via PayPal subscription.',
+                            style: TextStyle(fontSize: 13, color: Color(0xFF475467)),
+                          ),
+                          if (subId != null && subId.isNotEmpty) ...[
+                            const SizedBox(height: 8),
+                            Text(
+                              'Subscription Reference: $subId',
+                              style: const TextStyle(fontSize: 12, color: Color(0xFF64748B), fontFamily: 'monospace'),
+                            ),
+                          ],
+                          const SizedBox(height: 16),
+                          Wrap(
+                            spacing: 12,
+                            runSpacing: 10,
+                            children: [
+                              FilledButton.icon(
+                                style: FilledButton.styleFrom(
+                                  backgroundColor: isPro ? const Color(0xFF4F46E5) : const Color(0xFFFFC439),
+                                  foregroundColor: isPro ? Colors.white : const Color(0xFF003087),
+                                ),
+                                onPressed: () => PaywallScreen.showPaywall(context),
+                                icon: Icon(isPro ? Icons.manage_accounts_rounded : Icons.star_rounded, size: 18),
+                                label: Text(isPro ? 'Manage Subscription' : 'Upgrade to Pro with PayPal'),
+                              ),
+                              OutlinedButton.icon(
+                                onPressed: () => Navigator.push(
+                                  context,
+                                  MaterialPageRoute(builder: (_) => const PaypalConfigScreen()),
+                                ),
+                                icon: const Icon(Icons.settings_suggest_rounded, size: 18),
+                                label: const Text('PayPal Links / Plan Config'),
+                              ),
+                            ],
+                          ),
+                        ],
+                      );
+                    },
                   ),
                 ),
               ),

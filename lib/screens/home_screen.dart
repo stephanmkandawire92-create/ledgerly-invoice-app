@@ -21,6 +21,8 @@ import 'business_profile_screen.dart';
 import 'customers_screen.dart';
 import 'items_screen.dart';
 import 'payments_screen.dart';
+import '../services/subscription_service.dart';
+import 'paywall_screen.dart';
 
 const _brand = Color(0xFF4F46E5);
 const _ink = Color(0xFF172033);
@@ -167,6 +169,16 @@ class _HomeScreenState extends State<HomeScreen> {
         const SnackBar(content: Text('Resolve the local data issue before creating or changing records.')),
       );
       return;
+    }
+    if (existing == null && !SubscriptionService.instance.canCreateDocument(_documents.length)) {
+      final upgraded = await PaywallScreen.showPaywall(
+        context,
+        featurePrompt: 'You have reached the Free Tier limit of 5 documents. Subscribe with PayPal to unlock unlimited quotes and invoices.',
+      );
+      if (!mounted) return;
+      if (upgraded != true && !SubscriptionService.instance.isPro) {
+        return;
+      }
     }
     final result = await showDialog<BusinessDocument>(
       context: context,
@@ -510,6 +522,24 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
           ],
         ),
+        if (!SubscriptionService.instance.isPro) ...[
+          pw.SizedBox(height: 12),
+          pw.Container(
+            alignment: pw.Alignment.center,
+            padding: const pw.EdgeInsets.symmetric(vertical: 4),
+            decoration: const pw.BoxDecoration(
+              border: pw.Border(top: pw.BorderSide(color: PdfColors.grey300, width: 0.5)),
+            ),
+            child: pw.Text(
+              'Generated with Ledgerly Free • Upgrade to Pro to remove this watermark',
+              style: const pw.TextStyle(
+                fontSize: 8,
+                color: PdfColors.grey600,
+                fontStyle: pw.FontStyle.italic,
+              ),
+            ),
+          ),
+        ],
       ],
     ));
     return pdf.save();
@@ -693,6 +723,7 @@ class _HomeScreenState extends State<HomeScreen> {
               _SideNavigation(
                 section: _section,
                 langCode: _lang,
+                documentCount: _documents.length,
                 onSelect: (value) => setState(() {
                   _section = value;
                   _filter = 'All';
@@ -761,28 +792,41 @@ class _HomeScreenState extends State<HomeScreen> {
       context: context,
       showDragHandle: true,
       builder: (context) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            'Overview',
-            'Invoices',
-            'Quotes',
-            'Follow-ups',
-            'Clients',
-            'Items',
-            'Payments',
-            'Analytics',
-            'Settings'
-          ]
-              .map((label) => ListTile(
-                    leading: Icon(_iconFor(label)),
-                    title: Text(label),
-                    onTap: () {
-                      Navigator.pop(context);
-                      setState(() => _section = label);
-                    },
-                  ))
-              .toList(),
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              ListTile(
+                leading: const Icon(Icons.workspace_premium_rounded, color: Color(0xFFF59E0B)),
+                title: const Text('Ledgerly Pro (PayPal Subscription)', style: TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF4F46E5))),
+                subtitle: Text(SubscriptionService.instance.isPro ? 'Pro Active' : 'Upgrade for unlimited invoices & clean PDFs'),
+                onTap: () {
+                  Navigator.pop(context);
+                  PaywallScreen.showPaywall(context);
+                },
+              ),
+              const Divider(height: 1),
+              ...[
+                'Overview',
+                'Invoices',
+                'Quotes',
+                'Follow-ups',
+                'Clients',
+                'Items',
+                'Payments',
+                'Analytics',
+                'Settings'
+              ]
+                  .map((label) => ListTile(
+                        leading: Icon(_iconFor(label)),
+                        title: Text(label),
+                        onTap: () {
+                          Navigator.pop(context);
+                          setState(() => _section = label);
+                        },
+                      )),
+            ],
+          ),
         ),
       ),
     );
@@ -1154,6 +1198,47 @@ class _TopBar extends StatelessWidget {
               ],
             ),
             const Spacer(),
+            ListenableBuilder(
+              listenable: SubscriptionService.instance,
+              builder: (context, _) {
+                final isPro = SubscriptionService.instance.isPro;
+                return InkWell(
+                  onTap: () => PaywallScreen.showPaywall(context),
+                  borderRadius: BorderRadius.circular(20),
+                  child: Container(
+                    margin: const EdgeInsets.only(right: 12),
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                    decoration: BoxDecoration(
+                      color: isPro ? const Color(0xFFFEF3C7) : const Color(0xFFEEF2FF),
+                      borderRadius: BorderRadius.circular(20),
+                      border: Border.all(
+                        color: isPro ? const Color(0xFFF59E0B) : const Color(0xFF6366F1),
+                      ),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(
+                          Icons.workspace_premium_rounded,
+                          color: isPro ? const Color(0xFFD97706) : const Color(0xFF4F46E5),
+                          size: 16,
+                        ),
+                        const SizedBox(width: 4),
+                        Text(
+                          isPro ? 'PRO' : 'UPGRADE',
+                          style: TextStyle(
+                            fontSize: 11,
+                            fontWeight: FontWeight.w800,
+                            color: isPro ? const Color(0xFFB45309) : const Color(0xFF4F46E5),
+                            letterSpacing: 0.5,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                );
+              },
+            ),
             if (wide)
               SizedBox(
                 width: 260,
@@ -1204,11 +1289,13 @@ class _SideNavigation extends StatelessWidget {
   const _SideNavigation({
     required this.section,
     required this.langCode,
+    required this.documentCount,
     required this.onSelect,
   });
 
   final String section;
   final String langCode;
+  final int documentCount;
   final ValueChanged<String> onSelect;
 
   @override
@@ -1257,23 +1344,84 @@ class _SideNavigation extends StatelessWidget {
               );
             }),
             const Spacer(),
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.all(14),
-              decoration: BoxDecoration(
-                  color: const Color(0xFFF7F7FF),
-                  border: Border.all(color: const Color(0xFFE8E6FF)),
-                  borderRadius: BorderRadius.circular(14)),
-              child: const Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Icon(Icons.shield_outlined, color: _brand),
-                  SizedBox(height: 10),
-                  Text('Your workspace', style: TextStyle(fontWeight: FontWeight.bold, color: _ink)),
-                  SizedBox(height: 5),
-                  Text('Data saved locally on this device.', style: TextStyle(fontSize: 11, color: _muted, height: 1.5)),
-                ],
-              ),
+            ListenableBuilder(
+              listenable: SubscriptionService.instance,
+              builder: (context, _) {
+                final isPro = SubscriptionService.instance.isPro;
+                final remaining = SubscriptionService.instance.remainingFreeDocuments(documentCount);
+                final used = documentCount > 5 ? 5 : documentCount;
+
+                return Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(14),
+                  decoration: BoxDecoration(
+                    color: isPro ? const Color(0xFFF0FDF4) : const Color(0xFFF7F7FF),
+                    border: Border.all(
+                      color: isPro ? const Color(0xFFBBF7D0) : const Color(0xFFE8E6FF),
+                    ),
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Icon(
+                            isPro ? Icons.workspace_premium_rounded : Icons.shield_outlined,
+                            color: isPro ? const Color(0xFF16A34A) : _brand,
+                            size: 20,
+                          ),
+                          const SizedBox(width: 8),
+                          Text(
+                            isPro ? 'Ledgerly Pro' : 'Free Plan',
+                            style: TextStyle(
+                              fontWeight: FontWeight.bold,
+                              color: isPro ? const Color(0xFF166534) : _ink,
+                              fontSize: 13,
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 8),
+                      if (isPro) ...[
+                        const Text(
+                          'Unlimited invoices & quotes, no watermark, PayPal subscribed.',
+                          style: TextStyle(fontSize: 11, color: Color(0xFF166534), height: 1.4),
+                        ),
+                      ] else ...[
+                        Text(
+                          '$used of 5 free documents used ($remaining left)',
+                          style: const TextStyle(fontSize: 11, color: _muted),
+                        ),
+                        const SizedBox(height: 6),
+                        ClipRRect(
+                          borderRadius: BorderRadius.circular(4),
+                          child: LinearProgressIndicator(
+                            value: (used / 5).clamp(0.0, 1.0),
+                            minHeight: 5,
+                            backgroundColor: const Color(0xFFE2E8F0),
+                            color: _brand,
+                          ),
+                        ),
+                        const SizedBox(height: 10),
+                        SizedBox(
+                          width: double.infinity,
+                          child: FilledButton(
+                            style: FilledButton.styleFrom(
+                              backgroundColor: const Color(0xFFFFC439), // PayPal Gold
+                              foregroundColor: const Color(0xFF003087),
+                              padding: const EdgeInsets.symmetric(vertical: 8),
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                            ),
+                            onPressed: () => PaywallScreen.showPaywall(context),
+                            child: const Text('Upgrade Pro', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 12)),
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                );
+              },
             ),
           ],
         ),

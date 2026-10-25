@@ -1,8 +1,11 @@
 import 'package:flutter/material.dart';
 import 'screens/home_screen.dart';
 
-void main() {
+import 'services/subscription_service.dart';
+
+void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  await SubscriptionService.instance.init();
   runApp(const LedgerlyApp());
 }
 
