@@ -2,6 +2,11 @@ import 'dart:convert';
 
 enum DocumentKind { invoice, quote }
 
+double _roundMoney(double value) {
+  if (!value.isFinite) return 0.0;
+  return (value * 100).roundToDouble() / 100;
+}
+
 class DocumentLine {
   DocumentLine({
     required this.id,
@@ -84,11 +89,6 @@ class BusinessDocument {
   double get taxableAmount => _roundMoney((subtotal - safeDiscount).clamp(0.0, double.infinity).toDouble());
   double get taxAmount => _roundMoney(taxableAmount * safeTaxPercent / 100);
   double get total => _roundMoney(taxableAmount + taxAmount);
-
-  static double _roundMoney(double value) {
-    if (!value.isFinite) return 0.0;
-    return (value * 100).roundToDouble() / 100;
-  }
 
   Map<String, dynamic> toJson() => {
         'id': id,
