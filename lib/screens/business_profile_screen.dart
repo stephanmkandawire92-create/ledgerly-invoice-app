@@ -221,7 +221,7 @@ class _BusinessProfileScreenState extends State<BusinessProfileScreen> {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              const Text('Paste your JSON backup data below. WARNING: This will merge/overwrite current workspace data.'),
+              const Text('Paste your JSON backup data below. WARNING: This will replace the current workspace data.'),
               const SizedBox(height: 12),
               TextField(
                 controller: jsonCtrl,
