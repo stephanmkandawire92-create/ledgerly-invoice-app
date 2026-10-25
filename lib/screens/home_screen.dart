@@ -127,16 +127,34 @@ class _HomeScreenState extends State<HomeScreen> {
       ..sort((a, b) => b.issueDate.compareTo(a.issueDate));
   }
 
-  double get _paidTotal => _documents
-      .where((doc) => doc.kind == DocumentKind.invoice && doc.status == 'Paid')
-      .fold(0, (sum, doc) => sum + doc.total);
+  double get _paidTotal => _payments.fold<double>(0, (sum, payment) {
+        BusinessDocument? invoice;
+        for (final d in _documents) {
+          if (d.id == payment.invoiceId && d.kind == DocumentKind.invoice) { invoice = d; break; }
+        }
+        if (invoice == null ||
+            invoice.currencyCode.toUpperCase() != _profile.currencyCode.toUpperCase() ||
+            !payment.amount.isFinite ||
+            payment.amount <= 0) return sum;
+        return sum + payment.amount;
+      });
 
   double get _outstandingTotal => _documents
-      .where((doc) => doc.kind == DocumentKind.invoice && !['Paid', 'Draft', 'Void'].contains(doc.status))
-      .fold(0, (sum, doc) => sum + doc.total);
+      .where((doc) =>
+          doc.kind == DocumentKind.invoice &&
+          doc.currencyCode.toUpperCase() == _profile.currencyCode.toUpperCase() &&
+          !['Draft', 'Void'].contains(doc.status))
+      .fold<double>(0, (sum, doc) {
+        final paid = _payments.where((p) => p.invoiceId == doc.id && p.amount.isFinite && p.amount > 0)
+            .fold<double>(0, (amount, p) => amount + p.amount);
+        return sum + (doc.total - paid).clamp(0.0, doc.total).toDouble();
+      });
 
   double get _quoteTotal => _documents
-      .where((doc) => doc.kind == DocumentKind.quote && !['Accepted', 'Declined'].contains(doc.status))
+      .where((doc) =>
+          doc.kind == DocumentKind.quote &&
+          doc.currencyCode.toUpperCase() == _profile.currencyCode.toUpperCase() &&
+          !['Accepted', 'Declined'].contains(doc.status))
       .fold(0, (sum, doc) => sum + doc.total);
 
   Future<void> _createDocument(DocumentKind kind, {BusinessDocument? existing}) async {
@@ -154,6 +172,17 @@ class _HomeScreenState extends State<HomeScreen> {
       ),
     );
     if (result == null || !mounted) return;
+    if (kind == DocumentKind.invoice && result.status != 'Void' && result.status != 'Draft') {
+      final paid = _payments.where((p) => p.invoiceId == result.id && p.amount.isFinite && p.amount > 0)
+          .fold<double>(0, (sum, p) => sum + p.amount);
+      if (paid + 0.004 >= result.total) {
+        result.status = 'Paid';
+      } else if (paid > 0) {
+        result.status = 'Pending';
+      } else if (result.status == 'Paid' || result.status == 'Pending') {
+        result.status = result.dueDate.isBefore(DateTime.now()) ? 'Overdue' : 'Sent';
+      }
+    }
     setState(() {
       final index = _documents.indexWhere((doc) => doc.id == result.id);
       if (index >= 0) {
@@ -172,9 +201,13 @@ class _HomeScreenState extends State<HomeScreen> {
 
   String _nextNumber(DocumentKind kind) {
     final prefix = kind == DocumentKind.invoice ? _profile.invoicePrefix : _profile.quotePrefix;
-    final year = DateTime.now().year;
-    final count = _documents.where((doc) => doc.kind == kind).length + 1;
-    return '$prefix$year-${count.toString().padLeft(4, '0')}';
+    final stem = '$prefix${DateTime.now().year}-';
+    var highest = 0;
+    for (final doc in _documents.where((d) => d.kind == kind && d.number.startsWith(stem))) {
+      final sequence = int.tryParse(doc.number.substring(stem.length));
+      if (sequence != null && sequence > highest) highest = sequence;
+    }
+    return '$stem${(highest + 1).toString().padLeft(4, '0')}';
   }
 
   Future<Uint8List> _makePdf(BusinessDocument doc) async {
@@ -584,7 +617,9 @@ class _HomeScreenState extends State<HomeScreen> {
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('Delete document?'),
-        content: Text('Delete ${doc.number} for ${doc.clientName}? This cannot be undone on this device.'),
+        content: Text(doc.kind == DocumentKind.invoice && _payments.any((p) => p.invoiceId == doc.id)
+            ? 'Delete ${doc.number} for ${doc.clientName} and its linked payment records? This cannot be undone on this device.'
+            : 'Delete ${doc.number} for ${doc.clientName}? This cannot be undone on this device.'),
         actions: [
           TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
           FilledButton(
@@ -596,8 +631,22 @@ class _HomeScreenState extends State<HomeScreen> {
       ),
     );
     if (confirm != true || !mounted) return;
-    setState(() => _documents.removeWhere((item) => item.id == doc.id));
-    await _persist();
+    setState(() {
+      _documents.removeWhere((item) => item.id == doc.id);
+      if (doc.kind == DocumentKind.invoice) {
+        _payments.removeWhere((payment) => payment.invoiceId == doc.id);
+      }
+    });
+    try {
+      await _store.save(_documents);
+      await _store.savePayments(_payments);
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('The document deletion could not be fully saved. Check your records before continuing.')),
+        );
+      }
+    }
   }
 
   @override
@@ -1491,15 +1540,21 @@ class _DocumentEditorDialogState extends State<DocumentEditorDialog> {
     super.dispose();
   }
 
-  double get _subtotal => _lines.fold<double>(
-      0.0,
-      (sum, line) =>
-          sum +
-          (double.tryParse(line.quantity.text) ?? 0).clamp(0, 1e9).toDouble() *
-              (double.tryParse(line.price.text) ?? 0).clamp(0, 1e12).toDouble());
-  double get _discountValue => (double.tryParse(_discount.text) ?? 0).clamp(0, _subtotal).toDouble();
-  double get _taxValue => (double.tryParse(_tax.text) ?? 0).clamp(0, 100).toDouble();
-  double get _total => (_subtotal - _discountValue) * (1 + _taxValue / 100);
+  double get _subtotal => (_lines.fold<double>(0.0, (sum, line) => sum + line.amount) * 100).roundToDouble() / 100;
+  double get _discountValue {
+    final value = double.tryParse(_discount.text) ?? 0;
+    if (!value.isFinite || value <= 0) return 0;
+    return value.clamp(0.0, _subtotal).toDouble();
+  }
+  double get _taxValue {
+    final value = double.tryParse(_tax.text) ?? 0;
+    return value.isFinite ? value.clamp(0.0, 100.0).toDouble() : 0.0;
+  }
+  double get _total {
+    final taxable = (_subtotal - _discountValue).clamp(0.0, double.infinity).toDouble();
+    final tax = (taxable * _taxValue / 100 * 100).roundToDouble() / 100;
+    return ((taxable + tax) * 100).roundToDouble() / 100;
+  }
 
   Future<DateTime?> _chooseDate(DateTime initial) => showDatePicker(
         context: context,
@@ -1586,6 +1641,12 @@ class _DocumentEditorDialogState extends State<DocumentEditorDialog> {
 
   void _submit() {
     if (!_formKey.currentState!.validate()) return;
+    if (_dueDate.isBefore(DateTime(_issueDate.year, _issueDate.month, _issueDate.day))) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Due date cannot be earlier than the issue date.')),
+      );
+      return;
+    }
     final old = widget.existing;
     final doc = BusinessDocument(
       id: old?.id ?? const Uuid().v4(),
@@ -1916,9 +1977,14 @@ class _LineDraft {
   final TextEditingController quantity;
   final TextEditingController price;
 
-  double get amount =>
-      (double.tryParse(quantity.text) ?? 0).clamp(0, 1e9).toDouble() *
-      (double.tryParse(price.text) ?? 0).clamp(0, 1e12).toDouble();
+  double get amount {
+    final q = double.tryParse(quantity.text) ?? 0;
+    final p = double.tryParse(price.text) ?? 0;
+    final quantityValue = q.isFinite ? q.clamp(0.0, 1e9).toDouble() : 0.0;
+    final priceValue = p.isFinite ? p.clamp(0.0, 1e12).toDouble() : 0.0;
+    final value = quantityValue * priceValue;
+    return value.isFinite ? (value * 100).roundToDouble() / 100 : 0.0;
+  }
 
   factory _LineDraft.fromLine(DocumentLine line) => _LineDraft(
         id: line.id,
