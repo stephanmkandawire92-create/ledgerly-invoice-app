@@ -303,7 +303,7 @@ class _PaymentsScreenState extends State<PaymentsScreen> {
   }
 
   void _reconcileInvoiceStatus(BusinessDocument invoice, List<Payment> payments) {
-    if (invoice.kind != DocumentKind.invoice || invoice.status == 'Void' || invoice.status == 'Draft') return;
+    if (invoice.kind != DocumentKind.invoice || invoice.status == 'Void') return;
     final paid = payments.where((p) => p.invoiceId == invoice.id && p.amount.isFinite && p.amount > 0).fold<double>(0, (sum, p) => sum + p.amount);
     if (paid > 0 && paid + 0.004 >= invoice.total) {
       invoice.status = 'Paid';
