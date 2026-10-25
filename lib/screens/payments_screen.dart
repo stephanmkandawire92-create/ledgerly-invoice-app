@@ -49,7 +49,7 @@ class _PaymentsScreenState extends State<PaymentsScreen> {
 
   double _totalPaidForInvoice(String invoiceId) {
     return widget.payments
-        .where((p) => p.invoiceId == invoiceId)
+        .where((p) => p.invoiceId == invoiceId && p.amount.isFinite && p.amount > 0)
         .fold(0.0, (sum, p) => sum + p.amount);
   }
 
@@ -222,6 +222,7 @@ class _PaymentsScreenState extends State<PaymentsScreen> {
 
     if (result == null) return;
     final invoice = widget.documents.firstWhere((d) => d.id == result.invoiceId);
+    final originalStatus = invoice.status;
     final updatedPayments = List<Payment>.from(widget.payments)..add(result);
     try {
       _reconcileInvoiceStatus(invoice, updatedPayments);
@@ -230,9 +231,16 @@ class _PaymentsScreenState extends State<PaymentsScreen> {
       if (!mounted) return;
       widget.onPaymentsUpdated(updatedPayments);
     } catch (_) {
+      invoice.status = originalStatus;
+      try {
+        await _store.savePayments(widget.payments);
+        await _store.save(widget.documents);
+      } catch (_) {
+        // Keep the original error visible; rollback is best effort with local storage.
+      }
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Payment could not be saved. Please try again; check storage before repeating.')),
+          const SnackBar(content: Text('Payment could not be saved. Please check your records before trying again.')),
         );
       }
     }
@@ -264,6 +272,7 @@ class _PaymentsScreenState extends State<PaymentsScreen> {
     for (final document in widget.documents) {
       if (document.id == payment.invoiceId) { invoice = document; break; }
     }
+    final originalStatus = invoice?.status;
     try {
       if (invoice != null) _reconcileInvoiceStatus(invoice, updated);
       await _store.savePayments(updated);
@@ -271,9 +280,16 @@ class _PaymentsScreenState extends State<PaymentsScreen> {
       if (!mounted) return;
       widget.onPaymentsUpdated(updated);
     } catch (_) {
+      if (invoice != null && originalStatus != null) invoice.status = originalStatus;
+      try {
+        await _store.savePayments(widget.payments);
+        await _store.save(widget.documents);
+      } catch (_) {
+        // Best-effort rollback; report the failure instead of pretending it succeeded.
+      }
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Payment deletion could not be saved. Please try again.')),
+          const SnackBar(content: Text('Payment deletion could not be saved. Please check your records.')),
         );
       }
     }
@@ -288,7 +304,7 @@ class _PaymentsScreenState extends State<PaymentsScreen> {
 
   void _reconcileInvoiceStatus(BusinessDocument invoice, List<Payment> payments) {
     if (invoice.kind != DocumentKind.invoice || invoice.status == 'Void' || invoice.status == 'Draft') return;
-    final paid = payments.where((p) => p.invoiceId == invoice.id).fold<double>(0, (sum, p) => sum + p.amount);
+    final paid = payments.where((p) => p.invoiceId == invoice.id && p.amount.isFinite && p.amount > 0).fold<double>(0, (sum, p) => sum + p.amount);
     if (paid + 0.004 >= invoice.total) {
       invoice.status = 'Paid';
     } else if (paid > 0) {
