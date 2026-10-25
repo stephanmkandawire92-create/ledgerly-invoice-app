@@ -137,7 +137,9 @@ class _HomeScreenState extends State<HomeScreen> {
         if (invoice == null ||
             invoice.currencyCode.toUpperCase() != _profile.currencyCode.toUpperCase() ||
             !payment.amount.isFinite ||
-            payment.amount <= 0) return sum;
+            payment.amount <= 0) {
+          return sum;
+        }
         return sum + payment.amount;
       });
 
