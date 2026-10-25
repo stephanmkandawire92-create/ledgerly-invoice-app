@@ -15,7 +15,11 @@ class DocumentLine {
   double quantity;
   double unitPrice;
 
-  double get amount => quantity * unitPrice;
+  double get amount {
+    final safeQuantity = quantity.isFinite ? quantity.clamp(0.0, 1e9).toDouble() : 0.0;
+    final safePrice = unitPrice.isFinite ? unitPrice.clamp(0.0, 1e12).toDouble() : 0.0;
+    return _roundMoney(safeQuantity * safePrice);
+  }
 
   Map<String, dynamic> toJson() => {
         'id': id,
@@ -65,15 +69,26 @@ class BusinessDocument {
   String notes;
   String customerId;
 
-  double get subtotal => lines.fold<double>(0, (sum, line) {
-        final quantity = line.quantity.isFinite ? line.quantity.clamp(0, 1e9).toDouble() : 0.0;
-        final price = line.unitPrice.isFinite ? line.unitPrice.clamp(0, 1e12).toDouble() : 0.0;
-        return sum + quantity * price;
-      });
+  // Keep the same safe line amount for the editor, invoice totals, and PDF.
+  // Monetary totals are rounded to cents at each documented calculation stage.
+  double get subtotal => _roundMoney(lines.fold<double>(0, (sum, line) => sum + line.amount));
 
-  double get taxableAmount => (subtotal - discount).clamp(0, double.infinity).toDouble();
-  double get taxAmount => taxableAmount * taxPercent.clamp(0, 100).toDouble() / 100;
-  double get total => taxableAmount + taxAmount;
+  double get safeDiscount {
+    if (!discount.isFinite || discount <= 0) return 0;
+    return _roundMoney(discount.clamp(0.0, subtotal).toDouble());
+  }
+
+  double get safeTaxPercent =>
+      taxPercent.isFinite ? taxPercent.clamp(0.0, 100.0).toDouble() : 0.0;
+
+  double get taxableAmount => _roundMoney((subtotal - safeDiscount).clamp(0.0, double.infinity).toDouble());
+  double get taxAmount => _roundMoney(taxableAmount * safeTaxPercent / 100);
+  double get total => _roundMoney(taxableAmount + taxAmount);
+
+  static double _roundMoney(double value) {
+    if (!value.isFinite) return 0.0;
+    return (value * 100).roundToDouble() / 100;
+  }
 
   Map<String, dynamic> toJson() => {
         'id': id,
@@ -86,8 +101,8 @@ class BusinessDocument {
         'status': status,
         'currencyCode': currencyCode,
         'lines': lines.map((line) => line.toJson()).toList(),
-        'taxPercent': taxPercent,
-        'discount': discount,
+        'taxPercent': safeTaxPercent,
+        'discount': safeDiscount,
         'notes': notes,
         'customerId': customerId,
       };
