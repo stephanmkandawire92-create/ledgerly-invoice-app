@@ -120,22 +120,35 @@ class BusinessDocument {
         dueDate: DateTime.tryParse(json['dueDate'] as String? ?? '') ?? DateTime.now(),
         status: json['status'] as String? ?? 'Draft',
         currencyCode: json['currencyCode'] as String? ?? 'ZAR',
-        lines: (json['lines'] as List<dynamic>? ?? [])
-            .whereType<Map<String, dynamic>>()
-            .map(DocumentLine.fromJson)
-            .toList(),
+        lines: _decodeLines(json['lines']),
         taxPercent: (json['taxPercent'] as num?)?.toDouble() ?? 0,
         discount: (json['discount'] as num?)?.toDouble() ?? 0,
         notes: json['notes'] as String? ?? '',
         customerId: json['customerId'] as String? ?? '',
       );
 
+  static List<DocumentLine> _decodeLines(Object? value) {
+    if (value == null) return [];
+    if (value is! List) throw const FormatException('Document lines must be a list.');
+    return value.map((entry) {
+      if (entry is! Map<String, dynamic>) {
+        throw const FormatException('Document contains an invalid line item.');
+      }
+      return DocumentLine.fromJson(entry);
+    }).toList();
+  }
+
   static String encodeList(List<BusinessDocument> documents) =>
       jsonEncode(documents.map((document) => document.toJson()).toList());
 
-  static List<BusinessDocument> decodeList(String source) =>
-      (jsonDecode(source) as List<dynamic>)
-          .whereType<Map<String, dynamic>>()
-          .map(BusinessDocument.fromJson)
-          .toList();
+  static List<BusinessDocument> decodeList(String source) {
+    final decoded = jsonDecode(source);
+    if (decoded is! List) throw const FormatException('Saved documents must be a JSON list.');
+    return decoded.map((entry) {
+      if (entry is! Map<String, dynamic>) {
+        throw const FormatException('Saved documents contain an invalid record.');
+      }
+      return BusinessDocument.fromJson(entry);
+    }).toList();
+  }
 }
