@@ -147,6 +147,22 @@ class DocumentStore {
     _ensureUniqueIds(customers.map((e) => e.id), 'customers');
     _ensureUniqueIds(items.map((e) => e.id), 'items');
     _ensureUniqueIds(payments.map((e) => e.id), 'payments');
+    if (docs.any((d) =>
+        !d.taxPercent.isFinite || d.taxPercent < 0 || d.taxPercent > 100 ||
+        !d.discount.isFinite || d.discount < 0 ||
+        d.lines.any((line) =>
+            !line.quantity.isFinite || line.quantity <= 0 || line.quantity > 1e9 ||
+            !line.unitPrice.isFinite || line.unitPrice < 0 || line.unitPrice > 1e12))) {
+      throw const FormatException('Backup contains invalid invoice or quote amounts.');
+    }
+    if (items.any((item) =>
+        !item.unitPrice.isFinite || item.unitPrice < 0 || item.unitPrice > 1e12 ||
+        !item.taxRate.isFinite || item.taxRate < 0 || item.taxRate > 100)) {
+      throw const FormatException('Backup contains invalid catalogue prices or tax rates.');
+    }
+    if (payments.any((payment) => !payment.amount.isFinite || payment.amount <= 0)) {
+      throw const FormatException('Backup contains invalid payment amounts.');
+    }
     final invoiceIds = docs.where((d) => d.kind == DocumentKind.invoice).map((d) => d.id).toSet();
     if (payments.any((p) => !invoiceIds.contains(p.invoiceId))) {
       throw const FormatException('Backup contains a payment linked to a missing invoice.');
