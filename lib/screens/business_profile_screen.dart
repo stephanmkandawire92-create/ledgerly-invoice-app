@@ -109,13 +109,13 @@ class _BusinessProfileScreenState extends State<BusinessProfileScreen> {
     showDialog<void>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('Add Logo Image Data / Base64'),
+        title: const Text('Paste Your Logo'),
         content: SizedBox(
           width: 480,
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              const Text('Paste image Base64 data string below:'),
+              const Text('Paste your logo image data or Base64 string below:'),
               const SizedBox(height: 12),
               TextField(
                 controller: logoCtrl,
@@ -140,7 +140,7 @@ class _BusinessProfileScreenState extends State<BusinessProfileScreen> {
               Navigator.pop(ctx);
               _saveProfile();
             },
-            child: const Text('Apply Logo'),
+            child: const Text('Paste Your Logo'),
           ),
         ],
       ),
@@ -382,7 +382,7 @@ class _BusinessProfileScreenState extends State<BusinessProfileScreen> {
                                     OutlinedButton.icon(
                                       onPressed: _showBase64LogoDialog,
                                       icon: const Icon(Icons.code_rounded, size: 18),
-                                      label: const Text('Paste Base64'),
+                                      label: const Text('Paste Your Logo'),
                                     ),
                                     if (_logoBase64.isNotEmpty)
                                       TextButton.icon(
