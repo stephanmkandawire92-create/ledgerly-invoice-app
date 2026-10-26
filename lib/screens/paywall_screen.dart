@@ -261,6 +261,10 @@ class _PaywallScreenState extends State<PaywallScreen> {
                         ),
                       if (_isMobile)
                         TextButton(onPressed: _busy ? null : _restore, child: const Text('Restore purchases', style: TextStyle(color: Color(0xFFCBD5E1)))),
+                      TextButton(
+                        onPressed: _busy ? null : () => _run(_service.refreshEntitlement),
+                        child: const Text('Refresh payment status', style: TextStyle(color: Color(0xFFCBD5E1))),
+                      ),
                       if (!_isMobile && !_isWebOrWindows)
                         const Text('Purchases are not supported on this platform yet.', style: TextStyle(color: Colors.white70), textAlign: TextAlign.center),
                       OutlinedButton(
