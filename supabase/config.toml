@@ -1,0 +1,8 @@
+[functions.paypal-create-subscription]
+verify_jwt = true
+
+[functions.paypal-webhook]
+verify_jwt = false
+
+[functions.revenuecat-webhook]
+verify_jwt = false
