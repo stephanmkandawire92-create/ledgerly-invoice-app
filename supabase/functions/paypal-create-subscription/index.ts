@@ -48,6 +48,20 @@ Deno.serve(async (req) => {
       return json({ error: "Could not start PayPal checkout." }, 502);
     }
     const token = (await oauth.json()).access_token as string;
+    const planResponse = await fetch(base + "/v1/billing/plans/" + encodeURIComponent(planId), {
+      headers: { Authorization: "Bearer " + token },
+    });
+    if (!planResponse.ok) return json({ error: "The configured PayPal plan could not be verified." }, 503);
+    const plan = await planResponse.json();
+    const cycle = Array.isArray(plan.billing_cycles)
+      ? plan.billing_cycles.find((item: { tenure_type?: string }) => item.tenure_type === "REGULAR")
+      : undefined;
+    const price = cycle?.pricing_scheme?.fixed_price;
+    if (plan.status !== "ACTIVE" || price?.currency_code !== "USD" || price?.value !== "12.00" ||
+        cycle?.frequency?.interval_unit !== "MONTH" || cycle?.frequency?.interval_count !== 1) {
+      console.error("Configured PayPal plan must be active and exactly USD 12/month.");
+      return json({ error: "The PayPal plan is not configured as USD 12 per month." }, 503);
+    }
     const root = siteUrl.replace(/\/$/, "");
     const created = await fetch(base + "/v1/billing/subscriptions", {
       method: "POST",
