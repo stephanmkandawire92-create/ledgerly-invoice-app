@@ -232,8 +232,7 @@ class SubscriptionService extends ChangeNotifier {
 
   /// Local/manual activation is intentionally not supported. Premium access must be
   /// verified by RevenueCat or a server-side provider webhook.
-  @Deprecated('Premium access must be granted by verified subscription events.')
-  Future<void> activatePro({
+    Future<void> activatePro({
     required String planType,
     String? subscriptionId,
     bool isTrial = false,
@@ -242,8 +241,7 @@ class SubscriptionService extends ChangeNotifier {
     throw UnsupportedError('Manual Pro activation is disabled for payment security.');
   }
 
-  @Deprecated('Demo activation is disabled in production builds.')
-  Future<void> toggleDemoPro() async {
+    Future<void> toggleDemoPro() async {
     throw UnsupportedError('Demo Pro activation is disabled.');
   }
 
