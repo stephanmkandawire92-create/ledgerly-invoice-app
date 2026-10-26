@@ -24,8 +24,8 @@ void main() {
 
   test('Premium cannot be enabled through local/manual activation', () async {
     final sub = SubscriptionService.instance;
-    expect(
-      () => sub.activatePro(planType: 'monthly', subscriptionId: 'I-FAKE'),
+    await expectLater(
+      sub.activatePro(planType: 'monthly', subscriptionId: 'I-FAKE'),
       throwsUnsupportedError,
     );
     expect(sub.isPro, isFalse);
@@ -34,13 +34,13 @@ void main() {
 
   test('Demo mode cannot grant premium access', () async {
     final sub = SubscriptionService.instance;
-    expect(() => sub.toggleDemoPro(), throwsUnsupportedError);
+    await expectLater(sub.toggleDemoPro(), throwsUnsupportedError);
     expect(sub.isPro, isFalse);
   });
 
   test('Local cancel cannot alter provider-owned subscription state', () async {
     final sub = SubscriptionService.instance;
-    expect(() => sub.cancelSubscription(), throwsUnsupportedError);
+    await expectLater(sub.cancelSubscription(), throwsUnsupportedError);
     expect(sub.isPro, isFalse);
   });
 }
