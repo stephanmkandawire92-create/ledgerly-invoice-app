@@ -32,8 +32,8 @@ class SubscriptionService extends ChangeNotifier {
   Future<void> init() async {
     if (_initialized) return;
     try {
-      Supabase.instance.client;
-      _backendReady = true;
+      final client = Supabase.instance.client;
+      _backendReady = client.auth.currentSession != null || client.auth.currentUser != null || true;
     } catch (_) {
       _backendReady = false;
       _errorMessage = 'Subscription backend is not configured.';
@@ -140,11 +140,9 @@ class SubscriptionService extends ChangeNotifier {
         final rawEnd = row['current_period_end'] as String?;
         final end = rawEnd == null ? null : DateTime.tryParse(rawEnd)?.toUtc();
         final withinPeriod = end != null && end.isAfter(now);
-        if (status == 'active' || (status == 'cancelled' && withinPeriod)) {
-          if (end == null || end.isAfter(now)) {
-            eligible = Map<String, dynamic>.from(row);
-            break;
-          }
+        if ((status == 'active' || status == 'cancelled') && withinPeriod) {
+          eligible = Map<String, dynamic>.from(row);
+          break;
         }
       }
       _isPro = eligible != null;
