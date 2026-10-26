@@ -32,8 +32,8 @@ class SubscriptionService extends ChangeNotifier {
   Future<void> init() async {
     if (_initialized) return;
     try {
-      final client = Supabase.instance.client;
-      _backendReady = client.auth.currentSession != null || client.auth.currentUser != null || true;
+      _backendReady = Supabase.instance.client.auth.currentSession == null ||
+          Supabase.instance.client.auth.currentUser != null;
     } catch (_) {
       _backendReady = false;
       _errorMessage = 'Subscription backend is not configured.';
