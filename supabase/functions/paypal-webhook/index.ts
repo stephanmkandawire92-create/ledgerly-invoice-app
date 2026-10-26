@@ -94,7 +94,16 @@ Deno.serve(async (req) => {
     }
 
     const nextBilling = sub.billing_info?.next_billing_time;
-    const end = typeof nextBilling === "string" ? new Date(nextBilling).toISOString() : null;
+    const { data: previous } = await admin.from("subscription_entitlements")
+      .select("current_period_end")
+      .eq("provider", "paypal")
+      .eq("external_subscription_id", subscriptionId)
+      .maybeSingle();
+    // PayPal may omit next_billing_time after cancellation. Preserve the previously
+    // verified paid-through date rather than revoking access immediately.
+    const end = typeof nextBilling === "string"
+      ? new Date(nextBilling).toISOString()
+      : previous?.current_period_end ?? null;
     const { error: upsertError } = await admin.from("subscription_entitlements").upsert({
       user_id: userId,
       provider: "paypal",
