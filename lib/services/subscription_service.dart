@@ -1,88 +1,52 @@
 import 'package:flutter/foundation.dart';
-import 'package:shared_preferences/shared_preferences.dart';
+import 'package:purchases_flutter/purchases_flutter.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 class SubscriptionService extends ChangeNotifier {
   static final SubscriptionService instance = SubscriptionService._internal();
-
   SubscriptionService._internal();
 
-  static const String _keyIsPro = 'ledgerly.pro.is_active';
-  static const String _keyPlanType = 'ledgerly.pro.plan_type';
-  static const String _keySubscriptionId = 'ledgerly.pro.subscription_id';
-  static const String _keySubscribedAt = 'ledgerly.pro.subscribed_at';
-  static const String _keyExpiresAt = 'ledgerly.pro.expires_at';
-  static const String _keyIsTrial = 'ledgerly.pro.is_trial';
-  static const String _keyTrialEndsAt = 'ledgerly.pro.trial_ends_at';
-  static const String _keyMonthlyUrl = 'ledgerly.pro.paypal_monthly_url';
-  static const String _keyYearlyUrl = 'ledgerly.pro.paypal_yearly_url';
-  static const String _keyPayPalAccount = 'ledgerly.pro.paypal_account';
-
-  // Constants
   static const int maxFreeDocuments = 5;
-  static const String defaultMonthlyUrl = 'https://www.paypal.com/webapps/billing/plans/subscribe?plan_id=P-MONTHLY-LEDGERLY';
-  static const String defaultYearlyUrl = 'https://www.paypal.com/webapps/billing/plans/subscribe?plan_id=P-YEARLY-LEDGERLY';
+  static const String proEntitlement = 'ledgerly_pro';
 
   bool _isPro = false;
+  bool _initialized = false;
+  bool _backendReady = false;
+  bool _revenueCatConfigured = false;
   String? _planType;
   String? _subscriptionId;
-  DateTime? _subscribedAt;
   DateTime? _expiresAt;
-  bool _isTrial = false;
-  DateTime? _trialEndsAt;
-  String _paypalMonthlyUrl = defaultMonthlyUrl;
-  String _paypalYearlyUrl = defaultYearlyUrl;
-  String _paypalAccount = '';
-  bool _initialized = false;
+  String? _errorMessage;
 
   bool get isPro => _isPro;
+  bool get isInitialized => _initialized;
+  bool get isBackendReady => _backendReady;
+  bool get isSignedIn => _backendReady && Supabase.instance.client.auth.currentUser != null;
+  String? get currentUserId => _backendReady ? Supabase.instance.client.auth.currentUser?.id : null;
   String? get planType => _planType;
   String? get subscriptionId => _subscriptionId;
-  DateTime? get subscribedAt => _subscribedAt;
   DateTime? get expiresAt => _expiresAt;
-  bool get isTrial => _isTrial;
-  DateTime? get trialEndsAt => _trialEndsAt;
-  String get paypalMonthlyUrl => _paypalMonthlyUrl;
-  String get paypalYearlyUrl => _paypalYearlyUrl;
-  String get paypalAccount => _paypalAccount;
-  bool get isInitialized => _initialized;
+  String? get errorMessage => _errorMessage;
 
   Future<void> init() async {
     if (_initialized) return;
-    final prefs = await SharedPreferences.getInstance();
-
-    _isPro = prefs.getBool(_keyIsPro) ?? false;
-    _planType = prefs.getString(_keyPlanType);
-    _subscriptionId = prefs.getString(_keySubscriptionId);
-    _isTrial = prefs.getBool(_keyIsTrial) ?? false;
-
-    final subStr = prefs.getString(_keySubscribedAt);
-    if (subStr != null) _subscribedAt = DateTime.tryParse(subStr);
-
-    final expStr = prefs.getString(_keyExpiresAt);
-    if (expStr != null) _expiresAt = DateTime.tryParse(expStr);
-
-    final trialStr = prefs.getString(_keyTrialEndsAt);
-    if (trialStr != null) _trialEndsAt = DateTime.tryParse(trialStr);
-
-    _paypalMonthlyUrl = prefs.getString(_keyMonthlyUrl) ?? defaultMonthlyUrl;
-    _paypalYearlyUrl = prefs.getString(_keyYearlyUrl) ?? defaultYearlyUrl;
-    _paypalAccount = prefs.getString(_keyPayPalAccount) ?? '';
-
-    // Check if trial or subscription has expired
-    if (_isPro && _expiresAt != null && DateTime.now().isAfter(_expiresAt!)) {
-      _isPro = false;
-      await prefs.setBool(_keyIsPro, false);
+    try {
+      Supabase.instance.client;
+      _backendReady = true;
+    } catch (_) {
+      _backendReady = false;
+      _errorMessage = 'Subscription backend is not configured.';
     }
-
     _initialized = true;
+    if (_backendReady && Supabase.instance.client.auth.currentUser != null) {
+      await refreshEntitlement();
+    }
     notifyListeners();
   }
 
-  bool canCreateDocument(int totalExistingDocuments) {
-    if (_isPro) return true;
-    return totalExistingDocuments < maxFreeDocuments;
-  }
+  bool canCreateDocument(int totalExistingDocuments) =>
+      _isPro || totalExistingDocuments < maxFreeDocuments;
 
   int remainingFreeDocuments(int totalExistingDocuments) {
     if (_isPro) return 999999;
@@ -90,134 +54,194 @@ class SubscriptionService extends ChangeNotifier {
     return remaining < 0 ? 0 : remaining;
   }
 
-  /// Launch PayPal subscription URL in external browser
-  Future<bool> launchPayPalSubscription({
-    required bool isYearly,
-    bool startTrial = false,
-  }) async {
-    final baseUrl = isYearly ? _paypalYearlyUrl : _paypalMonthlyUrl;
-    final uri = Uri.tryParse(baseUrl);
-    if (uri == null) return false;
-
-    if (await canLaunchUrl(uri)) {
-      final launched = await launchUrl(uri, mode: LaunchMode.externalApplication);
-      return launched;
-    }
-    return false;
+  Future<void> signIn({required String email, required String password}) async {
+    _requireBackend();
+    await Supabase.instance.client.auth.signInWithPassword(
+      email: email.trim(),
+      password: password,
+    );
+    await _onAuthenticated();
   }
 
-  /// Activate Pro access (called after PayPal confirmation or manual ID entry)
+  Future<void> createAccount({required String email, required String password}) async {
+    _requireBackend();
+    await Supabase.instance.client.auth.signUp(
+      email: email.trim(),
+      password: password,
+    );
+    // If email confirmation is enabled, there may not be a session yet.
+    if (Supabase.instance.client.auth.currentUser != null) await _onAuthenticated();
+  }
+
+  Future<void> signOut() async {
+    if (!_backendReady) return;
+    await Supabase.instance.client.auth.signOut();
+    _isPro = false;
+    _planType = null;
+    _subscriptionId = null;
+    _expiresAt = null;
+    notifyListeners();
+  }
+
+  void _requireBackend() {
+    if (!_backendReady) {
+      throw StateError('Supabase is not configured. Add SUPABASE_URL and SUPABASE_PUBLISHABLE_KEY at build time.');
+    }
+  }
+
+  Future<void> _onAuthenticated() async {
+    final user = Supabase.instance.client.auth.currentUser;
+    if (user == null) return;
+    await _configureRevenueCat(user.id);
+    await refreshEntitlement();
+  }
+
+  Future<void> _configureRevenueCat(String userId) async {
+    if (kIsWeb || !(defaultTargetPlatform == TargetPlatform.android ||
+        defaultTargetPlatform == TargetPlatform.iOS)) return;
+    const androidKey = String.fromEnvironment('REVENUECAT_ANDROID_API_KEY');
+    const iosKey = String.fromEnvironment('REVENUECAT_IOS_API_KEY');
+    final key = defaultTargetPlatform == TargetPlatform.android ? androidKey : iosKey;
+    if (key.isEmpty) return;
+    if (!_revenueCatConfigured) {
+      await Purchases.configure(PurchasesConfiguration(key)..appUserID = userId);
+      _revenueCatConfigured = true;
+    } else {
+      await Purchases.logIn(userId);
+    }
+  }
+
+  Future<void> refreshEntitlement() async {
+    if (!_backendReady) {
+      _isPro = false;
+      notifyListeners();
+      return;
+    }
+    final user = Supabase.instance.client.auth.currentUser;
+    if (user == null) {
+      _isPro = false;
+      _planType = null;
+      _subscriptionId = null;
+      _expiresAt = null;
+      notifyListeners();
+      return;
+    }
+
+    try {
+      final rows = await Supabase.instance.client
+          .from('subscription_entitlements')
+          .select('provider, external_subscription_id, status, current_period_end, product_id')
+          .eq('user_id', user.id)
+          .order('updated_at', ascending: false);
+      final now = DateTime.now().toUtc();
+      Map<String, dynamic>? eligible;
+      for (final row in rows) {
+        final status = row['status'] as String?;
+        final rawEnd = row['current_period_end'] as String?;
+        final end = rawEnd == null ? null : DateTime.tryParse(rawEnd)?.toUtc();
+        final withinPeriod = end != null && end.isAfter(now);
+        if (status == 'active' || (status == 'cancelled' && withinPeriod)) {
+          if (end == null || end.isAfter(now)) {
+            eligible = Map<String, dynamic>.from(row);
+            break;
+          }
+        }
+      }
+      _isPro = eligible != null;
+      _planType = eligible?['provider'] as String?;
+      _subscriptionId = eligible?['external_subscription_id'] as String?;
+      _expiresAt = eligible?['current_period_end'] == null
+          ? null
+          : DateTime.tryParse(eligible!['current_period_end'] as String);
+      _errorMessage = null;
+    } catch (error) {
+      // Fail closed: a database/network error must never grant premium access.
+      _isPro = false;
+      _errorMessage = 'Could not verify subscription status. Please try again.';
+      debugPrint('Subscription verification failed: $error');
+    }
+    notifyListeners();
+  }
+
+  Future<bool> purchaseMobilePro() async {
+    _requireBackend();
+    final user = Supabase.instance.client.auth.currentUser;
+    if (user == null) throw StateError('Sign in before subscribing.');
+    if (kIsWeb || !(defaultTargetPlatform == TargetPlatform.android ||
+        defaultTargetPlatform == TargetPlatform.iOS)) {
+      throw UnsupportedError('App-store purchases are only supported on iOS and Android.');
+    }
+    await _configureRevenueCat(user.id);
+    if (!_revenueCatConfigured) {
+      throw StateError('RevenueCat is not configured for this platform.');
+    }
+    final offerings = await Purchases.getOfferings();
+    final package = offerings.current?.monthly;
+    if (package == null) throw StateError('No monthly product is configured in RevenueCat.');
+    final result = await Purchases.purchasePackage(package);
+    final active = result.customerInfo.entitlements.active.containsKey(proEntitlement);
+    if (!active) throw StateError('The purchase completed but the Ledgerly Pro entitlement is not active.');
+    // RevenueCat's verified customer info can unlock this signed-in session immediately.
+    _isPro = true;
+    _planType = 'revenuecat';
+    _subscriptionId = result.customerInfo.originalAppUserId;
+    notifyListeners();
+    await refreshEntitlement();
+    return _isPro;
+  }
+
+  Future<void> restoreMobilePurchases() async {
+    _requireBackend();
+    final user = Supabase.instance.client.auth.currentUser;
+    if (user == null) throw StateError('Sign in before restoring purchases.');
+    await _configureRevenueCat(user.id);
+    if (!_revenueCatConfigured) throw StateError('RevenueCat is not configured for this platform.');
+    final info = await Purchases.restorePurchases();
+    _isPro = info.entitlements.active.containsKey(proEntitlement);
+    await refreshEntitlement();
+    notifyListeners();
+  }
+
+  Future<bool> launchPayPalSubscription() async {
+    _requireBackend();
+    if (Supabase.instance.client.auth.currentUser == null) {
+      throw StateError('Sign in before subscribing.');
+    }
+    final response = await Supabase.instance.client.functions.invoke('paypal-create-subscription');
+    final data = response.data;
+    if (response.status < 200 || response.status >= 300 || data is! Map ||
+        data['approvalUrl'] is! String) {
+      throw StateError(data is Map && data['error'] is String
+          ? data['error'] as String
+          : 'PayPal checkout is not configured.');
+    }
+    final uri = Uri.tryParse(data['approvalUrl'] as String);
+    if (uri == null || uri.scheme != 'https' || uri.host != 'www.paypal.com' && uri.host != 'www.sandbox.paypal.com' && uri.host != 'paypal.com' && uri.host != 'sandbox.paypal.com') {
+      throw StateError('PayPal returned an invalid checkout URL.');
+    }
+    return launchUrl(uri, mode: LaunchMode.externalApplication);
+  }
+
+  /// Local/manual activation is intentionally not supported. Premium access must be
+  /// verified by RevenueCat or a server-side provider webhook.
+  @Deprecated('Premium access must be granted by verified subscription events.')
   Future<void> activatePro({
     required String planType,
     String? subscriptionId,
     bool isTrial = false,
     Duration? customDuration,
   }) async {
-    final prefs = await SharedPreferences.getInstance();
-    final now = DateTime.now();
-
-    DateTime expiry;
-    if (isTrial) {
-      expiry = now.add(const Duration(days: 7));
-    } else if (customDuration != null) {
-      expiry = now.add(customDuration);
-    } else if (planType == 'yearly') {
-      expiry = now.add(const Duration(days: 365));
-    } else {
-      expiry = now.add(const Duration(days: 30));
-    }
-
-    _isPro = true;
-    _planType = planType;
-    _subscriptionId = subscriptionId ?? 'PAYPAL-${now.millisecondsSinceEpoch}';
-    _subscribedAt = now;
-    _expiresAt = expiry;
-    _isTrial = isTrial;
-    _trialEndsAt = isTrial ? expiry : null;
-
-    await prefs.setBool(_keyIsPro, true);
-    await prefs.setString(_keyPlanType, _planType!);
-    await prefs.setString(_keySubscriptionId, _subscriptionId!);
-    await prefs.setString(_keySubscribedAt, _subscribedAt!.toIso8601String());
-    await prefs.setString(_keyExpiresAt, _expiresAt!.toIso8601String());
-    await prefs.setBool(_keyIsTrial, _isTrial);
-    if (_trialEndsAt != null) {
-      await prefs.setString(_keyTrialEndsAt, _trialEndsAt!.toIso8601String());
-    } else {
-      await prefs.remove(_keyTrialEndsAt);
-    }
-
-    notifyListeners();
+    throw UnsupportedError('Manual Pro activation is disabled for payment security.');
   }
 
-  /// Cancel or downgrade subscription
-  Future<void> cancelSubscription() async {
-    final prefs = await SharedPreferences.getInstance();
-    _isPro = false;
-    _planType = null;
-    _subscriptionId = null;
-    _expiresAt = null;
-    _isTrial = false;
-    _trialEndsAt = null;
-
-    await prefs.setBool(_keyIsPro, false);
-    await prefs.remove(_keyPlanType);
-    await prefs.remove(_keySubscriptionId);
-    await prefs.remove(_keyExpiresAt);
-    await prefs.remove(_keyIsTrial);
-    await prefs.remove(_keyTrialEndsAt);
-
-    notifyListeners();
-  }
-
-  /// Save custom PayPal Plan links and optional account handle/email
-  Future<void> savePayPalConfig({
-    required String monthlyUrl,
-    required String yearlyUrl,
-    String? paypalAccount,
-  }) async {
-    final prefs = await SharedPreferences.getInstance();
-    _paypalMonthlyUrl = monthlyUrl.trim().isEmpty ? defaultMonthlyUrl : monthlyUrl.trim();
-    _paypalYearlyUrl = yearlyUrl.trim().isEmpty ? defaultYearlyUrl : yearlyUrl.trim();
-    if (paypalAccount != null) {
-      _paypalAccount = paypalAccount.trim();
-      await prefs.setString(_keyPayPalAccount, _paypalAccount);
-    }
-
-    await prefs.setString(_keyMonthlyUrl, _paypalMonthlyUrl);
-    await prefs.setString(_keyYearlyUrl, _paypalYearlyUrl);
-    notifyListeners();
-  }
-
-  /// Automatically generate standard PayPal checkout / subscription URLs from an email or PayPal.Me handle
-  static Map<String, String> generatePayPalLinksFromAccount(String input) {
-    final clean = input.trim().replaceAll(RegExp(r'^https?://(www\.)?paypal\.me/'), '');
-    if (clean.isEmpty) {
-      return {'monthly': defaultMonthlyUrl, 'yearly': defaultYearlyUrl};
-    }
-    if (clean.contains('@')) {
-      // Standard PayPal subscription checkout
-      final monthly = 'https://www.paypal.com/cgi-bin/webscr?cmd=_xclick-subscriptions&business=${Uri.encodeComponent(clean)}&item_name=Ledgerly%20Pro%20Monthly&a3=4.99&p3=1&t3=M&src=1';
-      final yearly = 'https://www.paypal.com/cgi-bin/webscr?cmd=_xclick-subscriptions&business=${Uri.encodeComponent(clean)}&item_name=Ledgerly%20Pro%20Yearly&a3=39.99&p3=1&t3=Y&src=1';
-      return {'monthly': monthly, 'yearly': yearly};
-    } else {
-      // PayPal.Me direct link
-      final monthly = 'https://www.paypal.com/paypalme/$clean/4.99USD';
-      final yearly = 'https://www.paypal.com/paypalme/$clean/39.99USD';
-      return {'monthly': monthly, 'yearly': yearly};
-    }
-  }
-
-  /// Quick toggle for testing/demo mode
+  @Deprecated('Demo activation is disabled in production builds.')
   Future<void> toggleDemoPro() async {
-    if (_isPro) {
-      await cancelSubscription();
-    } else {
-      await activatePro(
-        planType: 'demo_pro',
-        subscriptionId: 'DEMO-${DateTime.now().millisecondsSinceEpoch}',
-        customDuration: const Duration(days: 365),
-      );
-    }
+    throw UnsupportedError('Demo Pro activation is disabled.');
+  }
+
+  /// Local cancellation cannot cancel a provider subscription and must not revoke
+  /// provider access prematurely. Use the store or PayPal account to manage billing.
+  Future<void> cancelSubscription() async {
+    throw UnsupportedError('Manage or cancel your subscription with the original payment provider.');
   }
 }
