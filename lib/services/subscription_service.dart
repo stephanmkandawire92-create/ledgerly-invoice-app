@@ -180,11 +180,15 @@ class SubscriptionService extends ChangeNotifier {
     final active = result.customerInfo.entitlements.active.containsKey(proEntitlement);
     if (!active) throw StateError('The purchase completed but the Ledgerly Pro entitlement is not active.');
     // RevenueCat's verified customer info can unlock this signed-in session immediately.
-    _isPro = true;
-    _planType = 'revenuecat';
-    _subscriptionId = result.customerInfo.originalAppUserId;
-    notifyListeners();
     await refreshEntitlement();
+    // A successful RevenueCat purchase result has already been store-validated.
+    // Grant immediate access in this session while the webhook syncs to Supabase.
+    if (!_isPro) {
+      _isPro = true;
+      _planType = 'revenuecat';
+      _subscriptionId = result.customerInfo.originalAppUserId;
+      notifyListeners();
+    }
     return _isPro;
   }
 
@@ -195,8 +199,14 @@ class SubscriptionService extends ChangeNotifier {
     await _configureRevenueCat(user.id);
     if (!_revenueCatConfigured) throw StateError('RevenueCat is not configured for this platform.');
     final info = await Purchases.restorePurchases();
-    _isPro = info.entitlements.active.containsKey(proEntitlement);
+    final hasVerifiedEntitlement = info.entitlements.active.containsKey(proEntitlement);
     await refreshEntitlement();
+    if (!_isPro && hasVerifiedEntitlement) {
+      _isPro = true;
+      _planType = 'revenuecat';
+    } else if (!hasVerifiedEntitlement) {
+      _isPro = false;
+    }
     notifyListeners();
   }
 
