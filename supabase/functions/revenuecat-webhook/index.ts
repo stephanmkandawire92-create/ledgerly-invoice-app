@@ -31,7 +31,7 @@ Deno.serve(async (req) => {
       .select("event_id").eq("provider", "revenuecat").eq("event_id", eventId).maybeSingle();
     if (existing) return json({ received: true, duplicate: true });
 
-    const terminal = type === "EXPIRATION";
+    const terminal = type === "EXPIRATION" || type === "REFUND";
     const entitlementIds = Array.isArray(event.entitlement_ids) ? event.entitlement_ids : [];
     if (!entitlementIds.includes("ledgerly_pro") && !terminal) {
       await admin.from("billing_webhook_events").insert({ provider: "revenuecat", event_id: eventId });
