@@ -69,8 +69,9 @@ class SubscriptionService extends ChangeNotifier {
       email: email.trim(),
       password: password,
     );
-    // If email confirmation is enabled, there may not be a session yet.
-    if (Supabase.instance.client.auth.currentUser != null) await _onAuthenticated();
+    if (Supabase.instance.client.auth.currentUser != null) {
+      await _onAuthenticated();
+    }
   }
 
   Future<void> signOut() async {
@@ -97,8 +98,11 @@ class SubscriptionService extends ChangeNotifier {
   }
 
   Future<void> _configureRevenueCat(String userId) async {
-    if (kIsWeb || !(defaultTargetPlatform == TargetPlatform.android ||
-        defaultTargetPlatform == TargetPlatform.iOS)) return;
+    if (kIsWeb ||
+        !(defaultTargetPlatform == TargetPlatform.android ||
+            defaultTargetPlatform == TargetPlatform.iOS)) {
+      return;
+    }
     const androidKey = String.fromEnvironment('REVENUECAT_ANDROID_API_KEY');
     const iosKey = String.fromEnvironment('REVENUECAT_IOS_API_KEY');
     final key = defaultTargetPlatform == TargetPlatform.android ? androidKey : iosKey;
@@ -153,7 +157,6 @@ class SubscriptionService extends ChangeNotifier {
           : DateTime.tryParse(eligible!['current_period_end'] as String);
       _errorMessage = null;
     } catch (error) {
-      // Fail closed: a database/network error must never grant premium access.
       _isPro = false;
       _errorMessage = 'Could not verify subscription status. Please try again.';
       debugPrint('Subscription verification failed: $error');
@@ -165,8 +168,9 @@ class SubscriptionService extends ChangeNotifier {
     _requireBackend();
     final user = Supabase.instance.client.auth.currentUser;
     if (user == null) throw StateError('Sign in before subscribing.');
-    if (kIsWeb || !(defaultTargetPlatform == TargetPlatform.android ||
-        defaultTargetPlatform == TargetPlatform.iOS)) {
+    if (kIsWeb ||
+        !(defaultTargetPlatform == TargetPlatform.android ||
+            defaultTargetPlatform == TargetPlatform.iOS)) {
       throw UnsupportedError('App-store purchases are only supported on iOS and Android.');
     }
     await _configureRevenueCat(user.id);
@@ -176,13 +180,10 @@ class SubscriptionService extends ChangeNotifier {
     final offerings = await Purchases.getOfferings();
     final package = offerings.current?.monthly;
     if (package == null) throw StateError('No monthly product is configured in RevenueCat.');
-    final result = await Purchases.purchasePackage(package);
+    final result = await Purchases.purchase(PurchaseParams.package(package));
     final active = result.customerInfo.entitlements.active.containsKey(proEntitlement);
     if (!active) throw StateError('The purchase completed but the Ledgerly Pro entitlement is not active.');
-    // RevenueCat's verified customer info can unlock this signed-in session immediately.
     await refreshEntitlement();
-    // A successful RevenueCat purchase result has already been store-validated.
-    // Grant immediate access in this session while the webhook syncs to Supabase.
     if (!_isPro) {
       _isPro = true;
       _planType = 'revenuecat';
@@ -197,7 +198,9 @@ class SubscriptionService extends ChangeNotifier {
     final user = Supabase.instance.client.auth.currentUser;
     if (user == null) throw StateError('Sign in before restoring purchases.');
     await _configureRevenueCat(user.id);
-    if (!_revenueCatConfigured) throw StateError('RevenueCat is not configured for this platform.');
+    if (!_revenueCatConfigured) {
+      throw StateError('RevenueCat is not configured for this platform.');
+    }
     final info = await Purchases.restorePurchases();
     final hasVerifiedEntitlement = info.entitlements.active.containsKey(proEntitlement);
     await refreshEntitlement();
@@ -224,15 +227,19 @@ class SubscriptionService extends ChangeNotifier {
           : 'PayPal checkout is not configured.');
     }
     final uri = Uri.tryParse(data['approvalUrl'] as String);
-    if (uri == null || uri.scheme != 'https' || uri.host != 'www.paypal.com' && uri.host != 'www.sandbox.paypal.com' && uri.host != 'paypal.com' && uri.host != 'sandbox.paypal.com') {
+    const paypalHosts = {
+      'www.paypal.com',
+      'www.sandbox.paypal.com',
+      'paypal.com',
+      'sandbox.paypal.com',
+    };
+    if (uri == null || uri.scheme != 'https' || !paypalHosts.contains(uri.host)) {
       throw StateError('PayPal returned an invalid checkout URL.');
     }
     return launchUrl(uri, mode: LaunchMode.externalApplication);
   }
 
-  /// Local/manual activation is intentionally not supported. Premium access must be
-  /// verified by RevenueCat or a server-side provider webhook.
-    Future<void> activatePro({
+  Future<void> activatePro({
     required String planType,
     String? subscriptionId,
     bool isTrial = false,
@@ -241,12 +248,10 @@ class SubscriptionService extends ChangeNotifier {
     throw UnsupportedError('Manual Pro activation is disabled for payment security.');
   }
 
-    Future<void> toggleDemoPro() async {
+  Future<void> toggleDemoPro() async {
     throw UnsupportedError('Demo Pro activation is disabled.');
   }
 
-  /// Local cancellation cannot cancel a provider subscription and must not revoke
-  /// provider access prematurely. Use the store or PayPal account to manage billing.
   Future<void> cancelSubscription() async {
     throw UnsupportedError('Manage or cancel your subscription with the original payment provider.');
   }
