@@ -16,6 +16,8 @@ class CloudStorageService {
 
   static const String tableName = 'ledgerly_cloud_data';
   static const String _modeKey = 'ledgerly.cloud_storage_enabled.v1';
+  final Map<String, String?> _revisions = <String, String?>{};
+
   static const List<String> sectionNames = <String>[
     'documents',
     'customers',
@@ -89,9 +91,10 @@ class CloudStorageService {
     final client = _requireSignedInClient();
     final row = await client
         .from(tableName)
-        .select('payload')
+        .select('payload,updated_at')
         .eq('data_type', section)
         .maybeSingle();
+    _revisions[section] = row == null ? null : row['updated_at']?.toString();
     return row == null ? null : row['payload'];
   }
 
@@ -99,16 +102,21 @@ class CloudStorageService {
     _validateSection(section);
     _validatePayload(section, payload);
     final client = _requireSignedInClient();
-    final user = client.auth.currentUser!;
-    await client.from(tableName).upsert(
-      <String, dynamic>{
-        'user_id': user.id,
-        'data_type': section,
-        'payload': payload,
-        'updated_at': DateTime.now().toUtc().toIso8601String(),
+    if (!_revisions.containsKey(section)) {
+      throw StateError('Load the cloud section before saving it.');
+    }
+    final updatedAt = await client.rpc(
+      'ledgerly_save_cloud_section',
+      params: <String, dynamic>{
+        'p_data_type': section,
+        'p_payload': payload,
+        'p_expected_updated_at': _revisions[section],
       },
-      onConflict: 'user_id,data_type',
     );
+    if (updatedAt == null) {
+      throw StateError('Cloud save did not return a revision. Reload before trying again.');
+    }
+    _revisions[section] = updatedAt.toString();
   }
 
   /// Uploads a validated local backup. Replacing a non-empty cloud workspace
@@ -126,7 +134,7 @@ class CloudStorageService {
     final client = _requireSignedInClient();
     // A single database function replaces all five sections in one transaction.
     // This prevents a network failure from leaving a half-migrated workspace.
-    await client.rpc(
+    final revisions = await client.rpc(
       'ledgerly_replace_cloud_workspace',
       params: <String, dynamic>{
         'p_documents': sections['documents'],
@@ -137,6 +145,17 @@ class CloudStorageService {
         'p_allow_overwrite': allowOverwrite,
       },
     );
+    if (revisions is! Map) {
+      throw StateError('Cloud migration completed without returning revision data.');
+    }
+    _revisions.clear();
+    for (final section in sectionNames) {
+      final revision = revisions[section];
+      if (revision == null) {
+        throw StateError('Cloud migration did not return a revision for "$section".');
+      }
+      _revisions[section] = revision.toString();
+    }
   }
 
   Future<String> exportCloudBackup() async {
