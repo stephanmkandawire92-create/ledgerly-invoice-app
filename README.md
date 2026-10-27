@@ -51,4 +51,4 @@ Before testing cloud storage:
 4. Sign in, then choose **Upload local records**, **Restore cloud records**, or **Cancel**.
 5. If the destination already has records, Ledgerly asks for explicit confirmation before replacing them.
 
-Cloud data is partitioned by authenticated user and protected by row-level security. This implementation writes cloud changes to Supabase before updating the local cache. If cloud writes fail, the app reports an error rather than claiming the cloud copy was updated. Local-only mode does not require the network.
+Cloud data is partitioned by authenticated user and protected by row-level security. Cloud writes use server-side revision checks, so a stale device cannot silently overwrite a newer cloud section. If another device changed a section, Ledgerly asks the user to refresh instead of overwriting the newer copy. Cloud changes are written to Supabase before updating the local cache. Local-only mode does not require the network.
