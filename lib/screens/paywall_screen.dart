@@ -218,7 +218,7 @@ class _PaywallScreenState extends State<PaywallScreen> {
                         border: Border.all(color: const Color(0xFF475569))),
                       child: Column(
                         children: [
-                          const Text('USD 12', style: TextStyle(color: Colors.white, fontSize: 36, fontWeight: FontWeight.w800)),
+                          const Text('USD 3', style: TextStyle(color: Colors.white, fontSize: 36, fontWeight: FontWeight.w800)),
                           const Text('per month • recurring subscription', style: TextStyle(color: Color(0xFFCBD5E1))),
                           const SizedBox(height: 20),
                           for (final feature in const [
