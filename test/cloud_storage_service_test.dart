@@ -1,8 +1,10 @@
 import 'dart:convert';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:ledgerly/models/business_profile.dart';
 import 'package:ledgerly/services/cloud_storage_service.dart';
+import 'package:ledgerly/services/document_store.dart';
 
 void main() {
   group('CloudStorageService backup validation', () {
@@ -98,4 +100,33 @@ void main() {
       expect(CloudStorageService.backupHasData(withInvoice), isTrue);
     });
   });
+  group('Local storage migration safety', () {
+    setUp(() async {
+      SharedPreferences.setMockInitialValues(<String, Object>{});
+    });
+
+    test('local mode can export an empty workspace without cloud setup', () async {
+      final backup = await DocumentStore().exportLocalBackup();
+
+      expect(CloudStorageService.backupHasData(backup), isFalse);
+      expect(CloudStorageService.decodeBackup(backup)['documents'], isEmpty);
+    });
+
+    test('backup restore keeps all required sections available locally', () async {
+      final backup = CloudStorageService.encodeBackup(<String, dynamic>{
+        'documents': <dynamic>[],
+        'customers': <dynamic>[],
+        'items': <dynamic>[],
+        'payments': <dynamic>[],
+        'profile': BusinessProfile().toJson(),
+      });
+
+      await DocumentStore().importBackup(backup);
+      final exported = await DocumentStore().exportLocalBackup();
+
+      expect(CloudStorageService.decodeBackup(exported).keys.toSet(),
+          containsAll(CloudStorageService.sectionNames));
+    });
+  });
+
 }
