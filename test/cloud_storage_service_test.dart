@@ -105,9 +105,12 @@ void main() {
       SharedPreferences.setMockInitialValues(<String, Object>{});
     });
 
-    test('local mode can export an empty workspace without cloud setup', () async {
-      final backup = await DocumentStore().exportLocalBackup();
+    test('local mode can load and save without cloud setup', () async {
+      final store = DocumentStore();
+      await store.save(<dynamic>[]);
 
+      expect(await store.load(), isEmpty);
+      final backup = await store.exportLocalBackup();
       expect(CloudStorageService.backupHasData(backup), isFalse);
       expect(CloudStorageService.decodeBackup(backup)['documents'], isEmpty);
     });
