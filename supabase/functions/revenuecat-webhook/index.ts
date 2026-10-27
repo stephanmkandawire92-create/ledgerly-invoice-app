@@ -21,32 +21,58 @@ Deno.serve(async (req) => {
     if (typeof eventId !== "string" || typeof userId !== "string" || typeof type !== "string") {
       return json({ error: "Invalid RevenueCat event" }, 400);
     }
-    // Purchases must be tied to a signed-in Ledgerly account, never an anonymous RC ID.
+    // The app configures RevenueCat with the signed-in Supabase UUID. Reject anonymous IDs.
     if (!/^[0-9a-f]{8}-[0-9a-f-]{27,}$/i.test(userId)) {
       return json({ error: "Unknown Ledgerly account reference" }, 400);
     }
 
     const admin = createClient(url, serviceKey, { auth: { persistSession: false } });
-    const { data: existing } = await admin.from("billing_webhook_events")
+    const { data: existing, error: duplicateCheckError } = await admin.from("billing_webhook_events")
       .select("event_id").eq("provider", "revenuecat").eq("event_id", eventId).maybeSingle();
+    if (duplicateCheckError) {
+      console.error("RevenueCat webhook duplicate check failed", duplicateCheckError);
+      return json({ error: "Could not check webhook idempotency" }, 500);
+    }
     if (existing) return json({ received: true, duplicate: true });
 
-    const terminal = type === "EXPIRATION" || type === "REFUND";
     const entitlementIds = Array.isArray(event.entitlement_ids) ? event.entitlement_ids : [];
+    const terminal = type === "EXPIRATION" || type === "REFUND";
     if (!entitlementIds.includes("ledgerly_pro") && !terminal) {
-      await admin.from("billing_webhook_events").insert({ provider: "revenuecat", event_id: eventId });
+      const { error } = await admin.from("billing_webhook_events").insert({
+        provider: "revenuecat", event_id: eventId,
+      });
+      if (error && error.code !== "23505") return json({ error: "Could not record ignored event" }, 500);
       return json({ received: true, ignored: true });
     }
 
-    const status = terminal ? "expired"
-      : type === "BILLING_ISSUE" ? "past_due"
-      : type === "CANCELLATION" ? "cancelled"
-      : ["REFUND_REVERSED", "PRODUCT_CHANGE"].includes(type) ? "active"
-      : "active";
+    const expiryMs = event.expiration_at_ms;
+    const graceExpiryMs = event.grace_period_expiration_at_ms;
+    let status: string;
+    let effectiveExpiryMs: number | null = typeof expiryMs === "number" ? expiryMs : null;
+
+    if (type === "EXPIRATION" || type === "REFUND") {
+      status = "expired";
+    } else if (type === "BILLING_ISSUE") {
+      // Preserve access only for a provider-confirmed grace period.
+      if (typeof graceExpiryMs === "number" && graceExpiryMs > Date.now()) {
+        status = "active";
+        effectiveExpiryMs = graceExpiryMs;
+      } else {
+        status = "past_due";
+      }
+    } else if (type === "CANCELLATION") {
+      status = "cancelled";
+    } else if (type === "REFUND_REVERSED" || type === "PRODUCT_CHANGE") {
+      status = "active";
+    } else {
+      // INITIAL_PURCHASE, RENEWAL, UNCANCELLATION and other entitlement events
+      // are active only when the provider supplies a future expiry.
+      status = effectiveExpiryMs !== null && effectiveExpiryMs > Date.now() ? "active" : "expired";
+    }
+
     const originalId = event.original_transaction_id ?? event.transaction_id ?? eventId;
     const externalId = String(originalId);
-    const expiryMs = event.expiration_at_ms;
-    const periodEnd = typeof expiryMs === "number" ? new Date(expiryMs).toISOString() : null;
+    const periodEnd = effectiveExpiryMs === null ? null : new Date(effectiveExpiryMs).toISOString();
     const { error } = await admin.from("subscription_entitlements").upsert({
       user_id: userId,
       provider: "revenuecat",
@@ -61,6 +87,7 @@ Deno.serve(async (req) => {
       console.error("RevenueCat entitlement update failed", error);
       return json({ error: "Could not update subscription status" }, 500);
     }
+
     const { error: recordError } = await admin.from("billing_webhook_events")
       .insert({ provider: "revenuecat", event_id: eventId });
     if (recordError && recordError.code !== "23505") return json({ error: "Could not record event" }, 500);
