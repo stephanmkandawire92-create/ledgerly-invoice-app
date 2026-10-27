@@ -1,10 +1,10 @@
 import 'dart:convert';
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import 'package:ledgerly/models/business_profile.dart';
 import 'package:ledgerly/services/cloud_storage_service.dart';
 import 'package:ledgerly/services/document_store.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 void main() {
   group('CloudStorageService backup validation', () {
@@ -131,5 +131,4 @@ void main() {
           containsAll(CloudStorageService.sectionNames));
     });
   });
-
 }
