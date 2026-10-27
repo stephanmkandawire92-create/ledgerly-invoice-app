@@ -83,17 +83,23 @@ class DocumentStore {
     final localSource = prefs.getString(key);
     if (!await CloudStorageService.instance.isCloudMode) return localSource;
 
-    try {
-      final payload = await CloudStorageService.instance.loadSection(section);
-      if (payload == null) return localSource;
-      final source = jsonEncode(payload);
-      // Cache the last successfully fetched cloud copy for this device.
-      await prefs.setString(key, source);
-      return source;
-    } catch (_) {
-      // Keep local work available if the network is temporarily unavailable.
-      return localSource;
+    // In cloud mode, never silently substitute a stale local cache after a
+    // network error or missing cloud section. The caller shows a load error;
+    // the user can explicitly switch to local mode instead.
+    final payload = await CloudStorageService.instance.loadSection(section);
+    if (payload == null) {
+      throw StateError(
+        'The cloud workspace is missing the "$section" section. Choose a migration option before continuing.',
+      );
     }
+    final source = jsonEncode(payload);
+    try {
+      // Cache only the last successfully fetched cloud copy.
+      await prefs.setString(key, source);
+    } catch (_) {
+      // The cloud response is still authoritative if local caching fails.
+    }
+    return source;
   }
 
   Future<void> _saveSource(
