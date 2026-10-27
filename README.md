@@ -45,7 +45,7 @@ flutter run --dart-define=SUPABASE_URL=https://YOUR_PROJECT_REF.supabase.co --da
 Use the project's publishable key only. Never put the Supabase service-role key in a Flutter app.
 
 Before testing cloud storage:
-1. Apply `supabase/migrations/20261027201302_ledgerly_optional_cloud_storage.sql and `supabase/migrations/20261027201332_ledgerly_atomic_workspace_migration.sql`` to the intended Supabase project.
+1. Apply both `supabase/migrations/20261027201302_ledgerly_optional_cloud_storage.sql` and `supabase/migrations/20261027201332_ledgerly_atomic_workspace_migration.sql` to the intended Supabase project.
 2. Enable email/password sign-up in Supabase Auth and configure email confirmation/reset URLs for your app.
 3. Build with `SUPABASE_URL` and `SUPABASE_PUBLISHABLE_KEY`.
 4. Sign in, then choose **Upload local records**, **Restore cloud records**, or **Cancel**.
