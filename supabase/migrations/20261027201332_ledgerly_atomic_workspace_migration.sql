@@ -8,13 +8,14 @@ create or replace function public.ledgerly_replace_cloud_workspace(
   p_profile jsonb,
   p_allow_overwrite boolean default false
 )
-returns void
+returns jsonb
 language plpgsql
 security invoker
 set search_path = ''
 as $$
 declare
   v_user_id uuid := (select auth.uid());
+  v_updated_at timestamptz := clock_timestamp();
 begin
   if v_user_id is null then
     raise exception 'Sign in is required to update the Ledgerly cloud workspace';
@@ -37,13 +38,21 @@ begin
 
   insert into public.ledgerly_cloud_data (user_id, data_type, payload, updated_at)
   values
-    (v_user_id, 'documents', p_documents, now()),
-    (v_user_id, 'customers', p_customers, now()),
-    (v_user_id, 'items', p_items, now()),
-    (v_user_id, 'payments', p_payments, now()),
-    (v_user_id, 'profile', p_profile, now())
+    (v_user_id, 'documents', p_documents, v_updated_at),
+    (v_user_id, 'customers', p_customers, v_updated_at),
+    (v_user_id, 'items', p_items, v_updated_at),
+    (v_user_id, 'payments', p_payments, v_updated_at),
+    (v_user_id, 'profile', p_profile, v_updated_at)
   on conflict (user_id, data_type)
   do update set payload = excluded.payload, updated_at = excluded.updated_at;
+
+  return jsonb_build_object(
+    'documents', v_updated_at,
+    'customers', v_updated_at,
+    'items', v_updated_at,
+    'payments', v_updated_at,
+    'profile', v_updated_at
+  );
 end;
 $$;
 
