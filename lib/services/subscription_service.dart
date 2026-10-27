@@ -181,16 +181,23 @@ class SubscriptionService extends ChangeNotifier {
     final package = offerings.current?.monthly;
     if (package == null) throw StateError('No monthly product is configured in RevenueCat.');
     final result = await Purchases.purchase(PurchaseParams.package(package));
-    final active = result.customerInfo.entitlements.active.containsKey(proEntitlement);
-    if (!active) throw StateError('The purchase completed but the Ledgerly Pro entitlement is not active.');
-    await refreshEntitlement();
-    if (!_isPro) {
-      _isPro = true;
-      _planType = 'revenuecat';
-      _subscriptionId = result.customerInfo.originalAppUserId;
-      notifyListeners();
+    final providerEntitlementActive =
+        result.customerInfo.entitlements.active.containsKey(proEntitlement);
+    if (!providerEntitlementActive) {
+      throw StateError('The store did not confirm the Ledgerly Pro entitlement.');
     }
-    return _isPro;
+
+    // RevenueCat webhooks are asynchronous. The database remains the authority:
+    // never grant premium from a client-side CustomerInfo result alone.
+    for (var attempt = 0; attempt < 8; attempt++) {
+      await refreshEntitlement();
+      if (_isPro) return true;
+      if (attempt < 7) await Future.delayed(const Duration(seconds: 2));
+    }
+    throw StateError(
+      'The store confirmed your purchase, but Ledgerly has not received the verified subscription update yet. '
+      'Your payment is not lost; wait a moment and use Refresh payment status.',
+    );
   }
 
   Future<void> restoreMobilePurchases() async {
@@ -202,15 +209,21 @@ class SubscriptionService extends ChangeNotifier {
       throw StateError('RevenueCat is not configured for this platform.');
     }
     final info = await Purchases.restorePurchases();
-    final hasVerifiedEntitlement = info.entitlements.active.containsKey(proEntitlement);
-    await refreshEntitlement();
-    if (!_isPro && hasVerifiedEntitlement) {
-      _isPro = true;
-      _planType = 'revenuecat';
-    } else if (!hasVerifiedEntitlement) {
-      _isPro = false;
+    final hasProviderEntitlement = info.entitlements.active.containsKey(proEntitlement);
+    // Restore proves the store purchase exists, but access is granted only after
+    // the RevenueCat webhook has written the matching account entitlement.
+    for (var attempt = 0; attempt < 8; attempt++) {
+      await refreshEntitlement();
+      if (_isPro) return;
+      if (attempt < 7) await Future.delayed(const Duration(seconds: 2));
     }
-    notifyListeners();
+    if (hasProviderEntitlement) {
+      throw StateError(
+        'Your store purchase was found, but the verified Ledgerly entitlement has not synced yet. '
+        'Please wait and refresh again.',
+      );
+    }
+    throw StateError('No active Ledgerly Pro purchase was found for this store account.');
   }
 
   Future<bool> launchPayPalSubscription() async {
