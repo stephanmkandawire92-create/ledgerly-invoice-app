@@ -9,9 +9,10 @@ Deno.serve(async (req) => {
   const webhookId = Deno.env.get("PAYPAL_WEBHOOK_ID");
   const clientId = Deno.env.get("PAYPAL_CLIENT_ID");
   const clientSecret = Deno.env.get("PAYPAL_CLIENT_SECRET");
+  const planId = Deno.env.get("PAYPAL_MONTHLY_PLAN_ID");
   const url = Deno.env.get("SUPABASE_URL");
   const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
-  if (!webhookId || !clientId || !clientSecret || !url || !serviceKey) {
+  if (!webhookId || !clientId || !clientSecret || !planId || !url || !serviceKey) {
     return json({ error: "Webhook not configured" }, 503);
   }
 
@@ -50,7 +51,9 @@ Deno.serve(async (req) => {
 
     const eventId = event?.id;
     const type = event?.event_type;
-    if (typeof eventId !== "string" || typeof type !== "string") return json({ error: "Invalid event" }, 400);
+    if (typeof eventId !== "string" || typeof type !== "string") {
+      return json({ error: "Invalid event" }, 400);
+    }
     const resource = event.resource ?? {};
     const subscriptionId = resource.id && type.startsWith("BILLING.SUBSCRIPTION.")
       ? resource.id
@@ -58,11 +61,15 @@ Deno.serve(async (req) => {
     if (typeof subscriptionId !== "string") return json({ received: true, ignored: true });
 
     const admin = createClient(url, serviceKey, { auth: { persistSession: false } });
-    const { data: existing } = await admin.from("billing_webhook_events")
+    const { data: existing, error: duplicateCheckError } = await admin.from("billing_webhook_events")
       .select("event_id").eq("provider", "paypal").eq("event_id", eventId).maybeSingle();
+    if (duplicateCheckError) {
+      console.error("PayPal webhook duplicate check failed", duplicateCheckError);
+      return json({ error: "Could not check webhook idempotency" }, 500);
+    }
     if (existing) return json({ received: true, duplicate: true });
 
-    // Retrieve canonical subscription details from PayPal, rather than trusting event fields.
+    // Always use PayPal's canonical subscription record, not customer-supplied event fields.
     const subResponse = await fetch(base + "/v1/billing/subscriptions/" + encodeURIComponent(subscriptionId), {
       headers: { Authorization: "Bearer " + token },
     });
@@ -71,36 +78,77 @@ Deno.serve(async (req) => {
       return json({ error: "Could not verify subscription status" }, 502);
     }
     const sub = await subResponse.json();
+
+    // Never grant Ledgerly Pro for a subscription created against another plan.
+    if (sub.plan_id !== planId) {
+      const { error } = await admin.from("billing_webhook_events").insert({
+        provider: "paypal", event_id: eventId,
+      });
+      if (error && error.code !== "23505") return json({ error: "Could not record ignored event" }, 500);
+      return json({ received: true, ignored: true });
+    }
+
     const userId = sub.custom_id;
     if (typeof userId !== "string" || !/^[0-9a-f]{8}-[0-9a-f-]{27,}$/i.test(userId)) {
       return json({ error: "Subscription has no valid Ledgerly account reference" }, 400);
     }
 
-    const eventStatuses: Record<string, string> = {
-      "BILLING.SUBSCRIPTION.ACTIVATED": "active",
-      "BILLING.SUBSCRIPTION.UPDATED": sub.status === "ACTIVE" ? "active" : "pending",
-      "BILLING.SUBSCRIPTION.CANCELLED": "cancelled",
-      "BILLING.SUBSCRIPTION.EXPIRED": "expired",
-      "BILLING.SUBSCRIPTION.SUSPENDED": "suspended",
-      "BILLING.SUBSCRIPTION.PAYMENT.FAILED": "past_due",
-      "PAYMENT.SALE.COMPLETED": "active",
-      "PAYMENT.SALE.REFUNDED": "past_due",
-      "PAYMENT.SALE.REVERSED": "past_due",
-    };
-    const status = eventStatuses[type];
-    if (!status) {
-      await admin.from("billing_webhook_events").insert({ provider: "paypal", event_id: eventId });
-      return json({ received: true, ignored: true });
-    }
-
-    const nextBilling = sub.billing_info?.next_billing_time;
-    const { data: previous } = await admin.from("subscription_entitlements")
-      .select("current_period_end")
+    const { data: previous, error: previousError } = await admin.from("subscription_entitlements")
+      .select("status,current_period_end")
       .eq("provider", "paypal")
       .eq("external_subscription_id", subscriptionId)
       .maybeSingle();
-    // PayPal may omit next_billing_time after cancellation. Preserve the previously
-    // verified paid-through date rather than revoking access immediately.
+    if (previousError) {
+      console.error("Could not read existing PayPal entitlement", previousError);
+      return json({ error: "Could not verify existing subscription state" }, 500);
+    }
+
+    let status: string;
+    switch (type) {
+      case "BILLING.SUBSCRIPTION.ACTIVATED":
+        // Approval/activation alone is not proof that the first payment succeeded.
+        status = previous?.status === "active" ? "active" : "pending";
+        break;
+      case "BILLING.SUBSCRIPTION.UPDATED":
+        status = sub.status === "ACTIVE"
+          ? (previous && ["active", "cancelled"].includes(previous.status) ? previous.status : "pending")
+          : sub.status === "CANCELLED" ? "cancelled"
+          : sub.status === "SUSPENDED" ? "suspended"
+          : sub.status === "EXPIRED" ? "expired" : "pending";
+        break;
+      case "BILLING.SUBSCRIPTION.CANCELLED":
+        status = "cancelled";
+        break;
+      case "BILLING.SUBSCRIPTION.EXPIRED":
+        status = "expired";
+        break;
+      case "BILLING.SUBSCRIPTION.SUSPENDED":
+        status = "suspended";
+        break;
+      case "BILLING.SUBSCRIPTION.PAYMENT.FAILED":
+        status = "past_due";
+        break;
+      case "PAYMENT.SALE.COMPLETED":
+        status = sub.status === "CANCELLED" ? "cancelled"
+          : sub.status === "ACTIVE" ? "active"
+          : sub.status === "EXPIRED" ? "expired"
+          : "past_due";
+        break;
+      case "PAYMENT.SALE.REFUNDED":
+      case "PAYMENT.SALE.REVERSED":
+        status = "past_due";
+        break;
+      default: {
+        const { error } = await admin.from("billing_webhook_events").insert({
+          provider: "paypal", event_id: eventId,
+        });
+        if (error && error.code !== "23505") return json({ error: "Could not record ignored event" }, 500);
+        return json({ received: true, ignored: true });
+      }
+    }
+
+    const nextBilling = sub.billing_info?.next_billing_time;
+    // A cancelled subscription can remain entitled until the already-paid period ends.
     const end = typeof nextBilling === "string"
       ? new Date(nextBilling).toISOString()
       : previous?.current_period_end ?? null;
@@ -108,7 +156,7 @@ Deno.serve(async (req) => {
       user_id: userId,
       provider: "paypal",
       external_subscription_id: subscriptionId,
-      product_id: sub.plan_id ?? null,
+      product_id: planId,
       status,
       current_period_end: end,
       last_event_id: eventId,
@@ -118,7 +166,8 @@ Deno.serve(async (req) => {
       console.error("PayPal entitlement update failed", upsertError);
       return json({ error: "Could not update subscription status" }, 500);
     }
-    // Record only after the entitlement write succeeds, so PayPal retries can recover failures.
+
+    // Record only after the entitlement write succeeds, so provider retries recover failures.
     const { error: recordError } = await admin.from("billing_webhook_events")
       .insert({ provider: "paypal", event_id: eventId });
     if (recordError && recordError.code !== "23505") return json({ error: "Could not record event" }, 500);
