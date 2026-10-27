@@ -104,7 +104,7 @@ class _HomeScreenState extends State<HomeScreen> {
       await _store.save(_documents);
       if (mounted) setState(() => _loadError = null);
       return true;
-    } catch (error) {
+    } catch (_) {
       final cloudMode = await CloudStorageService.instance.isCloudMode;
       if (mounted) {
         if (cloudMode) {
