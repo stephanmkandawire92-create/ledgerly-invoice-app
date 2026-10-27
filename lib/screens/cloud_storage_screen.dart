@@ -152,6 +152,17 @@ class _CloudStorageScreenState extends State<CloudStorageScreen> {
     }
 
     if (choice == 'upload') {
+      final previousCacheOwner = await _cloud.localCacheOwnerId;
+      final uploadingAcrossAccounts = previousCacheOwner != null &&
+          previousCacheOwner != _cloud.currentUser?.id;
+      if (uploadingAcrossAccounts) {
+        final confirmed = await _confirmReplace(
+          title: 'Upload records from another account?',
+          message: 'This device was last synchronized with a different Ledgerly account. Its local records may include that account’s business information. Uploading will copy this device’s records into the currently signed-in account. Continue only if you are sure this is intended.',
+          confirmLabel: 'Upload to this account',
+        );
+        if (confirmed != true || !mounted) return;
+      }
       if (cloudHasData) {
         final confirmed = await _confirmReplace(
           title: 'Replace cloud records?',
