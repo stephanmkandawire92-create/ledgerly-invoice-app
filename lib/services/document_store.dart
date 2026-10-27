@@ -247,6 +247,15 @@ class DocumentStore {
       throw const FormatException('Backup contains a payment linked to a missing invoice.');
     }
 
+    // Importing a backup while cloud mode is active must update the cloud
+    // workspace too. The Settings UI explicitly warns that this replaces data.
+    if (await CloudStorageService.instance.isCloudMode) {
+      await CloudStorageService.instance.uploadBackup(
+        jsonSource,
+        allowOverwrite: true,
+      );
+    }
+
     final values = <String, String>{
       _storageKey: BusinessDocument.encodeList(docs),
       _customersKey: Customer.encodeList(customers),
