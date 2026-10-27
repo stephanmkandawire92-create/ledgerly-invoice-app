@@ -46,7 +46,7 @@ class PaypalConfigScreen extends StatelessWidget {
           const SizedBox(height: 10),
           const _Step('1', 'Activate the correct Supabase project and apply supabase/subscription-schema.sql in a development project first.'),
           const _Step('2', 'Deploy paypal-create-subscription, paypal-webhook and revenuecat-webhook Edge Functions.'),
-          const _Step('3', 'Configure PayPal sandbox credentials and an active USD 12/month plan in server-side secrets.'),
+          const _Step('3', 'Set `PAYPAL_MONTHLY_PLAN_ID` to `P-3WT24403GG2655600NLQM6EA` in Supabase Edge Function secrets. Confirm this plan is ACTIVE at USD 3.00/month in the same PayPal environment as `PAYPAL_ENV`; keep client ID, client secret and webhook ID server-side.'),
           const _Step('4', 'Configure RevenueCat with Google Play and App Store products mapped to the ledgerly_pro entitlement.'),
           const _Step('5', 'Run sandbox tests for purchase, renewal, cancellation, expiry, refunds, duplicate events and forged webhooks.'),
           const SizedBox(height: 20),
