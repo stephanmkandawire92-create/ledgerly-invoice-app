@@ -16,6 +16,7 @@ class CloudStorageService {
 
   static const String tableName = 'ledgerly_cloud_data';
   static const String _modeKey = 'ledgerly.cloud_storage_enabled.v1';
+  static const String _cacheOwnerKey = 'ledgerly.cloud_cache_owner.v1';
   final Map<String, String?> _revisions = <String, String?>{};
 
   static const List<String> sectionNames = <String>[
@@ -45,11 +46,24 @@ class CloudStorageService {
     return prefs.getBool(_modeKey) == true && isSignedIn;
   }
 
+  Future<String?> get localCacheOwnerId async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getString(_cacheOwnerKey);
+  }
+
   Future<void> setCloudMode(bool enabled) async {
     if (enabled && !isSignedIn) {
       throw StateError('Sign in before enabling cloud storage.');
     }
     final prefs = await SharedPreferences.getInstance();
+    if (enabled) {
+      // Record which account last synchronized this device's local cache.
+      // Keep this marker when switching to local mode or signing out so a
+      // different account cannot upload that cache without an explicit warning.
+      if (!await prefs.setString(_cacheOwnerKey, currentUser!.id)) {
+        throw StateError('Could not save the cloud cache owner.');
+      }
+    }
     if (!await prefs.setBool(_modeKey, enabled)) {
       throw StateError('Could not save the storage preference.');
     }
