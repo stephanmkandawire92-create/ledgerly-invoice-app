@@ -107,7 +107,7 @@ void main() {
 
     test('local mode can load and save without cloud setup', () async {
       final store = DocumentStore();
-      await store.save(<dynamic>[]);
+      await store.save([]);
 
       expect(await store.load(), isEmpty);
       final backup = await store.exportLocalBackup();
