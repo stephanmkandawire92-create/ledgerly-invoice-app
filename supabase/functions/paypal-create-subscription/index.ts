@@ -57,10 +57,10 @@ Deno.serve(async (req) => {
       ? plan.billing_cycles.find((item: { tenure_type?: string }) => item.tenure_type === "REGULAR")
       : undefined;
     const price = cycle?.pricing_scheme?.fixed_price;
-    if (plan.status !== "ACTIVE" || price?.currency_code !== "USD" || price?.value !== "12.00" ||
+    if (plan.status !== "ACTIVE" || price?.currency_code !== "USD" || price?.value !== "3.00" ||
         cycle?.frequency?.interval_unit !== "MONTH" || cycle?.frequency?.interval_count !== 1) {
-      console.error("Configured PayPal plan must be active and exactly USD 12/month.");
-      return json({ error: "The PayPal plan is not configured as USD 12 per month." }, 503);
+      console.error("Configured PayPal plan must be active and exactly USD 3.00/month.");
+      return json({ error: "The PayPal plan is not configured as USD 3.00 per month." }, 503);
     }
     const root = siteUrl.replace(/\/$/, "");
     const created = await fetch(base + "/v1/billing/subscriptions", {
