@@ -123,9 +123,20 @@ class CloudStorageService {
       throw StateError('Cloud workspace already contains records.');
     }
 
-    for (final section in sectionNames) {
-      await saveSection(section, sections[section]!);
-    }
+    final client = _requireSignedInClient();
+    // A single database function replaces all five sections in one transaction.
+    // This prevents a network failure from leaving a half-migrated workspace.
+    await client.rpc(
+      'ledgerly_replace_cloud_workspace',
+      params: <String, dynamic>{
+        'p_documents': sections['documents'],
+        'p_customers': sections['customers'],
+        'p_items': sections['items'],
+        'p_payments': sections['payments'],
+        'p_profile': sections['profile'],
+        'p_allow_overwrite': allowOverwrite,
+      },
+    );
   }
 
   Future<String> exportCloudBackup() async {
