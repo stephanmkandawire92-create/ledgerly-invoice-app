@@ -14,12 +14,14 @@ class Payment {
     required this.id,
     required this.invoiceId,
     required this.paymentDate,
-    required this.amount,
+    required double amount,
     this.method = 'Bank Transfer',
     this.reference = '',
     this.notes = '',
     DateTime? createdAt,
-  }) : createdAt = createdAt ?? DateTime.now();
+  })  : amount =
+            amount.isFinite ? (amount * 100).roundToDouble() / 100 : amount,
+        createdAt = createdAt ?? DateTime.now();
 
   Map<String, dynamic> toJson() => {
         'id': id,

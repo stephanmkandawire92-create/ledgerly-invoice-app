@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:uuid/uuid.dart';
 import '../models/business_document.dart';
 import '../models/customer.dart';
+import '../models/currency_helper.dart';
 import '../services/document_store.dart';
 
 class CustomersScreen extends StatefulWidget {
@@ -9,11 +10,13 @@ class CustomersScreen extends StatefulWidget {
     super.key,
     required this.documents,
     required this.customers,
+    required this.currencyCode,
     required this.onCustomersUpdated,
   });
 
   final List<BusinessDocument> documents;
   final List<Customer> customers;
+  final String currencyCode;
   final ValueChanged<List<Customer>> onCustomersUpdated;
 
   @override
@@ -30,7 +33,8 @@ class _CustomersScreenState extends State<CustomersScreen> {
   void initState() {
     super.initState();
     _searchController.addListener(() {
-      setState(() => _searchQuery = _searchController.text.trim().toLowerCase());
+      setState(
+          () => _searchQuery = _searchController.text.trim().toLowerCase());
     });
   }
 
@@ -54,19 +58,33 @@ class _CustomersScreenState extends State<CustomersScreen> {
     return widget.documents
         .where((doc) =>
             doc.kind == DocumentKind.invoice &&
-            doc.currencyCode.toUpperCase() == 'ZAR' &&
+            doc.currencyCode.toUpperCase() ==
+                widget.currencyCode.toUpperCase() &&
             !['Void', 'Draft'].contains(doc.status) &&
-            (doc.customerId == customer.id ||
-                doc.clientName.trim().toLowerCase() == customer.name.trim().toLowerCase()))
+            _belongsToCustomer(doc, customer))
         .fold(0.0, (sum, doc) => sum + doc.total);
+  }
+
+  bool _belongsToCustomer(BusinessDocument document, Customer customer) {
+    if (document.customerId.isNotEmpty) {
+      final linked =
+          widget.customers.any((item) => item.id == document.customerId);
+      if (linked) return document.customerId == customer.id;
+    }
+    final sameName = widget.customers.where((item) =>
+        item.name.trim().toLowerCase() ==
+        document.clientName.trim().toLowerCase());
+    return sameName.length == 1 && sameName.first.id == customer.id;
   }
 
   Future<void> _openCustomerDialog({Customer? existing}) async {
     final nameCtrl = TextEditingController(text: existing?.name ?? '');
     final emailCtrl = TextEditingController(text: existing?.email ?? '');
     final phoneCtrl = TextEditingController(text: existing?.phone ?? '');
-    final billingCtrl = TextEditingController(text: existing?.billingAddress ?? '');
-    final shippingCtrl = TextEditingController(text: existing?.shippingAddress ?? '');
+    final billingCtrl =
+        TextEditingController(text: existing?.billingAddress ?? '');
+    final shippingCtrl =
+        TextEditingController(text: existing?.shippingAddress ?? '');
     final taxCtrl = TextEditingController(text: existing?.taxNumber ?? '');
     final notesCtrl = TextEditingController(text: existing?.notes ?? '');
     final formKey = GlobalKey<FormState>();
@@ -85,43 +103,52 @@ class _CustomersScreenState extends State<CustomersScreen> {
                 children: [
                   TextFormField(
                     controller: nameCtrl,
-                    decoration: const InputDecoration(labelText: 'Client / Company Name *'),
-                    validator: (v) => v == null || v.trim().isEmpty ? 'Name is required' : null,
+                    decoration: const InputDecoration(
+                        labelText: 'Client / Company Name *'),
+                    validator: (v) => v == null || v.trim().isEmpty
+                        ? 'Name is required'
+                        : null,
                   ),
                   const SizedBox(height: 12),
                   TextFormField(
                     controller: emailCtrl,
                     keyboardType: TextInputType.emailAddress,
-                    decoration: const InputDecoration(labelText: 'Email Address'),
+                    decoration:
+                        const InputDecoration(labelText: 'Email Address'),
                   ),
                   const SizedBox(height: 12),
                   TextFormField(
                     controller: phoneCtrl,
                     keyboardType: TextInputType.phone,
-                    decoration: const InputDecoration(labelText: 'Phone Number'),
+                    decoration:
+                        const InputDecoration(labelText: 'Phone Number'),
                   ),
                   const SizedBox(height: 12),
                   TextFormField(
                     controller: taxCtrl,
-                    decoration: const InputDecoration(labelText: 'VAT / Tax Number'),
+                    decoration:
+                        const InputDecoration(labelText: 'VAT / Tax Number'),
                   ),
                   const SizedBox(height: 12),
                   TextFormField(
                     controller: billingCtrl,
                     maxLines: 2,
-                    decoration: const InputDecoration(labelText: 'Billing Address'),
+                    decoration:
+                        const InputDecoration(labelText: 'Billing Address'),
                   ),
                   const SizedBox(height: 12),
                   TextFormField(
                     controller: shippingCtrl,
                     maxLines: 2,
-                    decoration: const InputDecoration(labelText: 'Shipping Address'),
+                    decoration:
+                        const InputDecoration(labelText: 'Shipping Address'),
                   ),
                   const SizedBox(height: 12),
                   TextFormField(
                     controller: notesCtrl,
                     maxLines: 2,
-                    decoration: const InputDecoration(labelText: 'Internal Notes'),
+                    decoration:
+                        const InputDecoration(labelText: 'Internal Notes'),
                   ),
                 ],
               ),
@@ -134,7 +161,7 @@ class _CustomersScreenState extends State<CustomersScreen> {
             child: const Text('Cancel'),
           ),
           FilledButton(
-            onPressed: () {
+            onPressed: () async {
               if (formKey.currentState?.validate() != true) return;
               final customer = Customer(
                 id: existing?.id ?? _uuid.v4(),
@@ -147,7 +174,26 @@ class _CustomersScreenState extends State<CustomersScreen> {
                 notes: notesCtrl.text.trim(),
                 createdAt: existing?.createdAt ?? DateTime.now(),
               );
-              Navigator.pop(ctx, customer);
+              final updatedList = List<Customer>.from(widget.customers);
+              final index =
+                  updatedList.indexWhere((item) => item.id == customer.id);
+              if (index >= 0) {
+                updatedList[index] = customer;
+              } else {
+                updatedList.add(customer);
+              }
+              try {
+                await _store.saveCustomers(updatedList);
+                if (ctx.mounted) Navigator.pop(ctx, customer);
+              } catch (_) {
+                if (mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                        content: Text(
+                            'Could not save this client. Check device storage and try again.')),
+                  );
+                }
+              }
             },
             child: Text(existing == null ? 'Add Client' : 'Save Changes'),
           ),
@@ -155,6 +201,13 @@ class _CustomersScreenState extends State<CustomersScreen> {
       ),
     );
 
+    nameCtrl.dispose();
+    emailCtrl.dispose();
+    phoneCtrl.dispose();
+    billingCtrl.dispose();
+    shippingCtrl.dispose();
+    taxCtrl.dispose();
+    notesCtrl.dispose();
     if (result == null) return;
     final updatedList = List<Customer>.from(widget.customers);
     final idx = updatedList.indexWhere((c) => c.id == result.id);
@@ -163,7 +216,6 @@ class _CustomersScreenState extends State<CustomersScreen> {
     } else {
       updatedList.add(result);
     }
-    await _store.saveCustomers(updatedList);
     widget.onCustomersUpdated(updatedList);
   }
 
@@ -179,7 +231,8 @@ class _CustomersScreenState extends State<CustomersScreen> {
             child: const Text('Cancel'),
           ),
           FilledButton(
-            style: FilledButton.styleFrom(backgroundColor: const Color(0xFFB42318)),
+            style: FilledButton.styleFrom(
+                backgroundColor: const Color(0xFFB42318)),
             onPressed: () => Navigator.pop(ctx, true),
             child: const Text('Delete'),
           ),
@@ -188,8 +241,20 @@ class _CustomersScreenState extends State<CustomersScreen> {
     );
 
     if (confirm != true) return;
-    final updatedList = widget.customers.where((c) => c.id != customer.id).toList();
-    await _store.saveCustomers(updatedList);
+    final updatedList =
+        widget.customers.where((c) => c.id != customer.id).toList();
+    try {
+      await _store.saveCustomers(updatedList);
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+              content: Text(
+                  'Could not delete this client. Check device storage and try again.')),
+        );
+      }
+      return;
+    }
     widget.onCustomersUpdated(updatedList);
   }
 
@@ -216,10 +281,13 @@ class _CustomersScreenState extends State<CustomersScreen> {
                           style: Theme.of(context)
                               .textTheme
                               .headlineMedium
-                              ?.copyWith(color: const Color(0xFF172033), fontSize: wide ? 30 : 25),
+                              ?.copyWith(
+                                  color: const Color(0xFF172033),
+                                  fontSize: wide ? 30 : 25),
                         ),
                         const SizedBox(height: 6),
-                        const Text('Manage client contact details, addresses, and transaction history.'),
+                        const Text(
+                            'Manage client contact details, addresses, and transaction history.'),
                       ],
                     ),
                   ),
@@ -253,14 +321,19 @@ class _CustomersScreenState extends State<CustomersScreen> {
                       child: Column(
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          const Icon(Icons.people_outline, size: 48, color: Color(0xFF7B8497)),
+                          const Icon(Icons.people_outline,
+                              size: 48, color: Color(0xFF7B8497)),
                           const SizedBox(height: 12),
                           Text(
-                            _searchQuery.isNotEmpty ? 'No matching clients found' : 'No clients saved yet',
-                            style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                            _searchQuery.isNotEmpty
+                                ? 'No matching clients found'
+                                : 'No clients saved yet',
+                            style: const TextStyle(
+                                fontSize: 18, fontWeight: FontWeight.bold),
                           ),
                           const SizedBox(height: 6),
-                          const Text('Add client details to easily select them when generating invoices.'),
+                          const Text(
+                              'Add client details to easily select them when generating invoices.'),
                           const SizedBox(height: 16),
                           FilledButton.icon(
                             onPressed: () => _openCustomerDialog(),
@@ -283,23 +356,29 @@ class _CustomersScreenState extends State<CustomersScreen> {
                       final customer = _filteredCustomers[index];
                       final billed = _totalBilledForCustomer(customer);
                       return ListTile(
-                        contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+                        contentPadding: const EdgeInsets.symmetric(
+                            horizontal: 20, vertical: 8),
                         leading: CircleAvatar(
-                          backgroundColor: const Color(0xFF4F46E5).withValues(alpha: 0.1),
+                          backgroundColor:
+                              const Color(0xFF4F46E5).withValues(alpha: 0.1),
                           foregroundColor: const Color(0xFF4F46E5),
                           child: Text(
-                            customer.name.isNotEmpty ? customer.name[0].toUpperCase() : 'C',
+                            customer.name.isNotEmpty
+                                ? customer.name[0].toUpperCase()
+                                : 'C',
                             style: const TextStyle(fontWeight: FontWeight.bold),
                           ),
                         ),
                         title: Text(
                           customer.name,
-                          style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+                          style: const TextStyle(
+                              fontWeight: FontWeight.bold, fontSize: 16),
                         ),
                         subtitle: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            if (customer.email.isNotEmpty || customer.phone.isNotEmpty)
+                            if (customer.email.isNotEmpty ||
+                                customer.phone.isNotEmpty)
                               Text([
                                 if (customer.email.isNotEmpty) customer.email,
                                 if (customer.phone.isNotEmpty) customer.phone
@@ -309,7 +388,8 @@ class _CustomersScreenState extends State<CustomersScreen> {
                                 customer.billingAddress,
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
-                                style: const TextStyle(fontSize: 12, color: Color(0xFF7B8497)),
+                                style: const TextStyle(
+                                    fontSize: 12, color: Color(0xFF7B8497)),
                               ),
                           ],
                         ),
@@ -320,20 +400,28 @@ class _CustomersScreenState extends State<CustomersScreen> {
                               mainAxisAlignment: MainAxisAlignment.center,
                               crossAxisAlignment: CrossAxisAlignment.end,
                               children: [
-                                const Text('Total Billed', style: TextStyle(fontSize: 11, color: Color(0xFF7B8497))),
+                                const Text('Total Billed',
+                                    style: TextStyle(
+                                        fontSize: 11,
+                                        color: Color(0xFF7B8497))),
                                 Text(
-                                  'R ${billed.toStringAsFixed(2)}',
-                                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+                                  CurrencyHelper.format(
+                                      billed, widget.currencyCode),
+                                  style: const TextStyle(
+                                      fontWeight: FontWeight.bold,
+                                      fontSize: 14),
                                 ),
                               ],
                             ),
                             const SizedBox(width: 12),
                             IconButton(
                               icon: const Icon(Icons.edit_outlined, size: 20),
-                              onPressed: () => _openCustomerDialog(existing: customer),
+                              onPressed: () =>
+                                  _openCustomerDialog(existing: customer),
                             ),
                             IconButton(
-                              icon: const Icon(Icons.delete_outline, size: 20, color: Color(0xFFB42318)),
+                              icon: const Icon(Icons.delete_outline,
+                                  size: 20, color: Color(0xFFB42318)),
                               onPressed: () => _deleteCustomer(customer),
                             ),
                           ],

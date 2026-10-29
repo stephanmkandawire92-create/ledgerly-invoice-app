@@ -7,75 +7,160 @@ import '../models/item.dart';
 import '../models/payment.dart';
 
 class DocumentStore {
+  static const _snapshotKey = 'ledgerly.workspace.snapshot.v1';
   static const _storageKey = 'ledgerly.documents.v1';
   static const _customersKey = 'ledgerly.customers.v1';
   static const _itemsKey = 'ledgerly.items.v1';
   static const _paymentsKey = 'ledgerly.payments.v1';
   static const _profileKey = 'ledgerly.profile.v1';
 
-  static const _allKeys = [
-    _storageKey,
-    _customersKey,
-    _itemsKey,
-    _paymentsKey,
-    _profileKey,
-  ];
-
   // A decoding error must reach the caller. Returning an empty collection here
   // makes damaged data look like a new workspace and risks overwriting it.
   Future<List<BusinessDocument>> load() async {
-    final prefs = await SharedPreferences.getInstance();
-    final source = prefs.getString(_storageKey);
+    final source = await _readValue(_storageKey, 'documents');
     if (source == null || source.trim().isEmpty) return [];
     return BusinessDocument.decodeList(source);
   }
 
   Future<void> save(List<BusinessDocument> documents) async {
-    await _write(_storageKey, jsonEncode(documents.map((d) => d.toJson()).toList()));
+    final payments = await loadPayments();
+    await saveDocumentsAndPayments(documents, payments);
   }
 
   Future<List<Customer>> loadCustomers() async {
-    final prefs = await SharedPreferences.getInstance();
-    final source = prefs.getString(_customersKey);
+    final source = await _readValue(_customersKey, 'customers');
     if (source == null || source.trim().isEmpty) return [];
     return Customer.decodeList(source);
   }
 
   Future<void> saveCustomers(List<Customer> customers) async {
-    await _write(_customersKey, Customer.encodeList(customers));
+    await _saveValue(
+        _customersKey, 'customers', Customer.encodeList(customers));
   }
 
   Future<List<Item>> loadItems() async {
-    final prefs = await SharedPreferences.getInstance();
-    final source = prefs.getString(_itemsKey);
+    final source = await _readValue(_itemsKey, 'items');
     if (source == null || source.trim().isEmpty) return [];
     return Item.decodeList(source);
   }
 
   Future<void> saveItems(List<Item> items) async {
-    await _write(_itemsKey, Item.encodeList(items));
+    await _saveValue(_itemsKey, 'items', Item.encodeList(items));
   }
 
   Future<List<Payment>> loadPayments() async {
-    final prefs = await SharedPreferences.getInstance();
-    final source = prefs.getString(_paymentsKey);
+    final source = await _readValue(_paymentsKey, 'payments');
     if (source == null || source.trim().isEmpty) return [];
     return Payment.decodeList(source);
   }
 
   Future<void> savePayments(List<Payment> payments) async {
-    await _write(_paymentsKey, Payment.encodeList(payments));
+    await _saveValue(_paymentsKey, 'payments', Payment.encodeList(payments));
+  }
+
+  Future<void> saveDocumentsAndPayments(
+    List<BusinessDocument> documents,
+    List<Payment> payments,
+  ) async {
+    final invoiceTotals = {
+      for (final invoice in documents
+          .where((document) => document.kind == DocumentKind.invoice))
+        invoice.id: invoice.total,
+    };
+    final paidByInvoice = <String, double>{};
+    for (final payment in payments) {
+      if (!payment.amount.isFinite ||
+          payment.amount <= 0 ||
+          roundMoney(payment.amount) != payment.amount ||
+          !invoiceTotals.containsKey(payment.invoiceId)) {
+        throw const FormatException(
+            'Payment must be positive, cent-rounded, and linked to an invoice.');
+      }
+      paidByInvoice.update(
+          payment.invoiceId, (amount) => roundMoney(amount + payment.amount),
+          ifAbsent: () => roundMoney(payment.amount));
+    }
+    if (paidByInvoice.entries.any(
+        (entry) => entry.value > (invoiceTotals[entry.key] ?? 0) + 0.004)) {
+      throw const FormatException('Payments cannot exceed an invoice total.');
+    }
+
+    final prefs = await SharedPreferences.getInstance();
+    final snapshotSource = prefs.getString(_snapshotKey);
+    late final Map<String, dynamic> snapshot;
+    if (snapshotSource == null) {
+      Object readLegacy(String key, Object fallback) {
+        final source = prefs.getString(key);
+        return source == null || source.trim().isEmpty
+            ? fallback
+            : jsonDecode(source);
+      }
+
+      snapshot = {
+        'version': 1,
+        'documents': readLegacy(_storageKey, <dynamic>[]),
+        'customers': readLegacy(_customersKey, <dynamic>[]),
+        'items': readLegacy(_itemsKey, <dynamic>[]),
+        'payments': readLegacy(_paymentsKey, <dynamic>[]),
+        'profile': readLegacy(_profileKey, BusinessProfile().toJson()),
+      };
+    } else {
+      final decoded = jsonDecode(snapshotSource);
+      if (decoded is! Map<String, dynamic> || decoded['version'] != 1) {
+        throw const FormatException('Saved workspace snapshot is invalid.');
+      }
+      snapshot = Map<String, dynamic>.from(decoded);
+    }
+    snapshot['documents'] =
+        documents.map((document) => document.toJson()).toList();
+    snapshot['payments'] = payments.map((payment) => payment.toJson()).toList();
+    if (!await prefs.setString(_snapshotKey, jsonEncode(snapshot))) {
+      throw StateError(
+          'Could not persist invoice and payment changes atomically.');
+    }
   }
 
   Future<BusinessProfile> loadProfile() async {
-    final prefs = await SharedPreferences.getInstance();
-    final source = prefs.getString(_profileKey);
+    final source = await _readValue(_profileKey, 'profile');
     if (source == null || source.trim().isEmpty) return BusinessProfile();
     return BusinessProfile.decode(source);
   }
 
   Future<void> saveProfile(BusinessProfile profile) async {
-    await _write(_profileKey, profile.encode());
+    await _saveValue(_profileKey, 'profile', profile.encode());
+  }
+
+  Future<String?> _readValue(String legacyKey, String section) async {
+    final prefs = await SharedPreferences.getInstance();
+    final snapshotSource = prefs.getString(_snapshotKey);
+    if (snapshotSource == null) return prefs.getString(legacyKey);
+    final decoded = jsonDecode(snapshotSource);
+    if (decoded is! Map<String, dynamic> || decoded['version'] != 1) {
+      throw const FormatException('Saved workspace snapshot is invalid.');
+    }
+    if (!decoded.containsKey(section)) {
+      throw FormatException('Saved workspace snapshot is missing "$section".');
+    }
+    return jsonEncode(decoded[section]);
+  }
+
+  Future<void> _saveValue(
+      String legacyKey, String section, String value) async {
+    final prefs = await SharedPreferences.getInstance();
+    final snapshotSource = prefs.getString(_snapshotKey);
+    if (snapshotSource == null) {
+      await _write(legacyKey, value);
+      return;
+    }
+    final decoded = jsonDecode(snapshotSource);
+    if (decoded is! Map<String, dynamic> || decoded['version'] != 1) {
+      throw const FormatException('Saved workspace snapshot is invalid.');
+    }
+    decoded[section] = jsonDecode(value);
+    if (!await prefs.setString(_snapshotKey, jsonEncode(decoded))) {
+      throw StateError(
+          'Could not persist Ledgerly workspace section: $section');
+    }
   }
 
   Future<void> _write(String key, String value) async {
@@ -114,96 +199,204 @@ class DocumentStore {
     if (data['version'] != 1) {
       throw const FormatException('Unsupported or missing backup version.');
     }
-    for (final key in ['documents', 'customers', 'items', 'payments', 'profile']) {
+    for (final key in [
+      'documents',
+      'customers',
+      'items',
+      'payments',
+      'profile'
+    ]) {
       if (!data.containsKey(key)) {
         throw FormatException('Backup is missing required section: $key');
       }
     }
+    _validateBackupShape(data);
 
     List<T> decodeList<T>(
       Object? value,
       T Function(Map<String, dynamic>) decode,
       String section,
     ) {
-      if (value is! List) throw FormatException('Backup section "$section" must be a list.');
+      if (value is! List) {
+        throw FormatException('Backup section "$section" must be a list.');
+      }
       return value.map((entry) {
         if (entry is! Map<String, dynamic>) {
-          throw FormatException('Backup section "$section" contains an invalid record.');
+          throw FormatException(
+              'Backup section "$section" contains an invalid record.');
         }
         return decode(entry);
       }).toList();
     }
 
-    final docs = decodeList(data['documents'], BusinessDocument.fromJson, 'documents');
-    final customers = decodeList(data['customers'], Customer.fromJson, 'customers');
+    final docs =
+        decodeList(data['documents'], BusinessDocument.fromJson, 'documents');
+    final customers =
+        decodeList(data['customers'], Customer.fromJson, 'customers');
     final items = decodeList(data['items'], Item.fromJson, 'items');
     final payments = decodeList(data['payments'], Payment.fromJson, 'payments');
     if (data['profile'] is! Map<String, dynamic>) {
       throw const FormatException('Backup profile section is invalid.');
     }
-    final profile = BusinessProfile.fromJson(data['profile'] as Map<String, dynamic>);
+    final profile =
+        BusinessProfile.fromJson(data['profile'] as Map<String, dynamic>);
 
     _ensureUniqueIds(docs.map((e) => e.id), 'documents');
     _ensureUniqueIds(customers.map((e) => e.id), 'customers');
     _ensureUniqueIds(items.map((e) => e.id), 'items');
     _ensureUniqueIds(payments.map((e) => e.id), 'payments');
     if (docs.any((d) =>
-        !d.taxPercent.isFinite || d.taxPercent < 0 || d.taxPercent > 100 ||
-        !d.discount.isFinite || d.discount < 0 ||
+        !d.taxPercent.isFinite ||
+        d.taxPercent < 0 ||
+        d.taxPercent > 100 ||
+        !d.discount.isFinite ||
+        d.discount < 0 ||
         d.lines.any((line) =>
-            !line.quantity.isFinite || line.quantity <= 0 || line.quantity > 1e9 ||
-            !line.unitPrice.isFinite || line.unitPrice < 0 || line.unitPrice > 1e12))) {
-      throw const FormatException('Backup contains invalid invoice or quote amounts.');
+            !line.quantity.isFinite ||
+            line.quantity <= 0 ||
+            line.quantity > 1e9 ||
+            !line.unitPrice.isFinite ||
+            line.unitPrice < 0 ||
+            line.unitPrice > 1e12))) {
+      throw const FormatException(
+          'Backup contains invalid invoice or quote amounts.');
     }
     if (items.any((item) =>
-        !item.unitPrice.isFinite || item.unitPrice < 0 || item.unitPrice > 1e12 ||
-        !item.taxRate.isFinite || item.taxRate < 0 || item.taxRate > 100)) {
-      throw const FormatException('Backup contains invalid catalogue prices or tax rates.');
+        !item.unitPrice.isFinite ||
+        item.unitPrice < 0 ||
+        item.unitPrice > 1e12 ||
+        !item.taxRate.isFinite ||
+        item.taxRate < 0 ||
+        item.taxRate > 100)) {
+      throw const FormatException(
+          'Backup contains invalid catalogue prices or tax rates.');
     }
-    if (payments.any((payment) => !payment.amount.isFinite || payment.amount <= 0)) {
+    if (payments.any((payment) =>
+        !payment.amount.isFinite ||
+        payment.amount <= 0 ||
+        roundMoney(payment.amount) != payment.amount)) {
       throw const FormatException('Backup contains invalid payment amounts.');
     }
-    final invoiceIds = docs.where((d) => d.kind == DocumentKind.invoice).map((d) => d.id).toSet();
+    final invoiceIds = docs
+        .where((d) => d.kind == DocumentKind.invoice)
+        .map((d) => d.id)
+        .toSet();
     if (payments.any((p) => !invoiceIds.contains(p.invoiceId))) {
-      throw const FormatException('Backup contains a payment linked to a missing invoice.');
+      throw const FormatException(
+          'Backup contains a payment linked to a missing invoice.');
+    }
+    final invoiceTotals = {
+      for (final invoice in docs.where((d) => d.kind == DocumentKind.invoice))
+        invoice.id: invoice.total
+    };
+    final paidByInvoice = <String, double>{};
+    for (final payment in payments) {
+      paidByInvoice.update(
+          payment.invoiceId, (amount) => roundMoney(amount + payment.amount),
+          ifAbsent: () => roundMoney(payment.amount));
+    }
+    if (paidByInvoice.entries.any(
+        (entry) => entry.value > (invoiceTotals[entry.key] ?? 0) + 0.004)) {
+      throw const FormatException(
+          'Backup contains payments greater than an invoice total.');
     }
 
-    final values = <String, String>{
-      _storageKey: BusinessDocument.encodeList(docs),
-      _customersKey: Customer.encodeList(customers),
-      _itemsKey: Item.encodeList(items),
-      _paymentsKey: Payment.encodeList(payments),
-      _profileKey: profile.encode(),
+    final snapshot = <String, dynamic>{
+      'version': 1,
+      'documents': docs.map((d) => d.toJson()).toList(),
+      'customers': customers.map((c) => c.toJson()).toList(),
+      'items': items.map((i) => i.toJson()).toList(),
+      'payments': payments.map((p) => p.toJson()).toList(),
+      'profile': profile.toJson(),
     };
 
     final prefs = await SharedPreferences.getInstance();
-    final oldValues = <String, String?>{
-      for (final key in _allKeys) key: prefs.getString(key),
-    };
-    try {
-      for (final entry in values.entries) {
-        if (!await prefs.setString(entry.key, entry.value)) {
-          throw StateError('Could not restore backup section: ${entry.key}');
+    if (!await prefs.setString(_snapshotKey, jsonEncode(snapshot))) {
+      throw StateError('Could not atomically restore Ledgerly workspace data.');
+    }
+  }
+
+  void _validateBackupShape(Map<String, dynamic> data) {
+    final documents = data['documents'];
+    final customers = data['customers'];
+    final items = data['items'];
+    final payments = data['payments'];
+    if (documents is! List ||
+        customers is! List ||
+        items is! List ||
+        payments is! List) {
+      throw const FormatException('Backup contains an invalid section.');
+    }
+
+    void requireDate(Map<String, dynamic> record, String key, String section) {
+      final raw = record[key];
+      if (raw is! String || DateTime.tryParse(raw) == null) {
+        throw FormatException('Backup contains an invalid $section.$key date.');
+      }
+    }
+
+    final documentNumbers = <String>{};
+    for (final entry in documents) {
+      if (entry is! Map<String, dynamic>) {
+        throw const FormatException('Backup contains an invalid document.');
+      }
+      if (entry['kind'] != 'invoice' && entry['kind'] != 'quote') {
+        throw const FormatException(
+            'Backup contains a document with an unknown kind.');
+      }
+      requireDate(entry, 'issueDate', 'document');
+      requireDate(entry, 'dueDate', 'document');
+      final number = entry['number'];
+      if (number is! String || number.trim().isEmpty) {
+        throw const FormatException(
+            'Backup contains a document without a number.');
+      }
+      final key = '${entry['kind']}:${number.trim().toLowerCase()}';
+      if (!documentNumbers.add(key)) {
+        throw const FormatException(
+            'Backup contains duplicate document numbers.');
+      }
+      final lines = entry['lines'];
+      if (lines is! List) {
+        throw const FormatException(
+            'Backup contains an invalid document line list.');
+      }
+      for (final line in lines) {
+        if (line is! Map<String, dynamic> ||
+            line['quantity'] is! num ||
+            line['unitPrice'] is! num) {
+          throw const FormatException(
+              'Backup contains a line without a valid quantity or unit price.');
         }
       }
-    } catch (_) {
-      // Best-effort rollback to the previous stored values if any write fails.
-      for (final key in _allKeys) {
-        final previous = oldValues[key];
-        if (previous == null) {
-          await prefs.remove(key);
-        } else {
-          await prefs.setString(key, previous);
-        }
+    }
+    for (final entry in customers) {
+      if (entry is! Map<String, dynamic>) {
+        throw const FormatException('Backup contains an invalid customer.');
       }
-      rethrow;
+      requireDate(entry, 'createdAt', 'customer');
+    }
+    for (final entry in items) {
+      if (entry is! Map<String, dynamic>) {
+        throw const FormatException('Backup contains an invalid item.');
+      }
+      requireDate(entry, 'createdAt', 'item');
+    }
+    for (final entry in payments) {
+      if (entry is! Map<String, dynamic>) {
+        throw const FormatException('Backup contains an invalid payment.');
+      }
+      requireDate(entry, 'paymentDate', 'payment');
+      requireDate(entry, 'createdAt', 'payment');
     }
   }
 
   void _ensureUniqueIds(Iterable<String> ids, String section) {
     final values = ids.toList();
-    if (values.any((id) => id.trim().isEmpty) || values.toSet().length != values.length) {
-      throw FormatException('Backup contains missing or duplicate IDs in "$section".');
+    if (values.any((id) => id.trim().isEmpty) ||
+        values.toSet().length != values.length) {
+      throw FormatException(
+          'Backup contains missing or duplicate IDs in "$section".');
     }
   }
 }

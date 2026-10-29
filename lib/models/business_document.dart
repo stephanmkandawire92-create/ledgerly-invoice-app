@@ -1,10 +1,52 @@
 import 'dart:convert';
+import 'payment.dart';
 
 enum DocumentKind { invoice, quote }
 
-double _roundMoney(double value) {
+double roundMoney(double value) {
   if (!value.isFinite) return 0.0;
   return (value * 100).roundToDouble() / 100;
+}
+
+bool isPastDueDate(DateTime dueDate, {DateTime? now}) {
+  final current = now ?? DateTime.now();
+  final today = DateTime(current.year, current.month, current.day);
+  final dueDay = DateTime(dueDate.year, dueDate.month, dueDate.day);
+  return dueDay.isBefore(today);
+}
+
+String effectiveInvoiceStatus(
+  BusinessDocument document,
+  Iterable<Payment> payments, {
+  DateTime? now,
+  bool clearPaidWhenNoPayments = false,
+}) {
+  if (document.kind != DocumentKind.invoice ||
+      document.status == 'Draft' ||
+      document.status == 'Void') {
+    return document.status;
+  }
+
+  final paid = payments
+      .where((payment) =>
+          payment.invoiceId == document.id &&
+          payment.amount.isFinite &&
+          payment.amount > 0)
+      .fold<double>(0, (sum, payment) => sum + payment.amount);
+  if (paid > 0) {
+    if (paid + 0.004 >= document.total) return 'Paid';
+    return isPastDueDate(document.dueDate, now: now) ? 'Overdue' : 'Pending';
+  }
+
+  if (document.status == 'Paid') {
+    if (!clearPaidWhenNoPayments) return 'Paid';
+    return isPastDueDate(document.dueDate, now: now) ? 'Overdue' : 'Sent';
+  }
+  if (isPastDueDate(document.dueDate, now: now)) return 'Overdue';
+  if (document.status == 'Pending' || document.status == 'Overdue') {
+    return 'Sent';
+  }
+  return document.status;
 }
 
 class DocumentLine {
@@ -21,9 +63,11 @@ class DocumentLine {
   double unitPrice;
 
   double get amount {
-    final safeQuantity = quantity.isFinite ? quantity.clamp(0.0, 1e9).toDouble() : 0.0;
-    final safePrice = unitPrice.isFinite ? unitPrice.clamp(0.0, 1e12).toDouble() : 0.0;
-    return _roundMoney(safeQuantity * safePrice);
+    final safeQuantity =
+        quantity.isFinite ? quantity.clamp(0.0, 1e9).toDouble() : 0.0;
+    final safePrice =
+        unitPrice.isFinite ? unitPrice.clamp(0.0, 1e12).toDouble() : 0.0;
+    return roundMoney(safeQuantity * safePrice);
   }
 
   Map<String, dynamic> toJson() => {
@@ -76,19 +120,21 @@ class BusinessDocument {
 
   // Keep the same safe line amount for the editor, invoice totals, and PDF.
   // Monetary totals are rounded to cents at each documented calculation stage.
-  double get subtotal => _roundMoney(lines.fold<double>(0, (sum, line) => sum + line.amount));
+  double get subtotal =>
+      roundMoney(lines.fold<double>(0, (sum, line) => sum + line.amount));
 
   double get safeDiscount {
     if (!discount.isFinite || discount <= 0) return 0;
-    return _roundMoney(discount.clamp(0.0, subtotal).toDouble());
+    return roundMoney(discount.clamp(0.0, subtotal).toDouble());
   }
 
   double get safeTaxPercent =>
       taxPercent.isFinite ? taxPercent.clamp(0.0, 100.0).toDouble() : 0.0;
 
-  double get taxableAmount => _roundMoney((subtotal - safeDiscount).clamp(0.0, double.infinity).toDouble());
-  double get taxAmount => _roundMoney(taxableAmount * safeTaxPercent / 100);
-  double get total => _roundMoney(taxableAmount + taxAmount);
+  double get taxableAmount => roundMoney(
+      (subtotal - safeDiscount).clamp(0.0, double.infinity).toDouble());
+  double get taxAmount => roundMoney(taxableAmount * safeTaxPercent / 100);
+  double get total => roundMoney(taxableAmount + taxAmount);
 
   Map<String, dynamic> toJson() => {
         'id': id,
@@ -107,7 +153,8 @@ class BusinessDocument {
         'customerId': customerId,
       };
 
-  factory BusinessDocument.fromJson(Map<String, dynamic> json) => BusinessDocument(
+  factory BusinessDocument.fromJson(Map<String, dynamic> json) =>
+      BusinessDocument(
         id: json['id'] as String? ?? '',
         number: json['number'] as String? ?? '',
         kind: DocumentKind.values.firstWhere(
@@ -116,8 +163,10 @@ class BusinessDocument {
         ),
         clientName: json['clientName'] as String? ?? '',
         clientEmail: json['clientEmail'] as String? ?? '',
-        issueDate: DateTime.tryParse(json['issueDate'] as String? ?? '') ?? DateTime.now(),
-        dueDate: DateTime.tryParse(json['dueDate'] as String? ?? '') ?? DateTime.now(),
+        issueDate: DateTime.tryParse(json['issueDate'] as String? ?? '') ??
+            DateTime.now(),
+        dueDate: DateTime.tryParse(json['dueDate'] as String? ?? '') ??
+            DateTime.now(),
         status: json['status'] as String? ?? 'Draft',
         currencyCode: json['currencyCode'] as String? ?? 'ZAR',
         lines: _decodeLines(json['lines']),
@@ -129,7 +178,9 @@ class BusinessDocument {
 
   static List<DocumentLine> _decodeLines(Object? value) {
     if (value == null) return [];
-    if (value is! List) throw const FormatException('Document lines must be a list.');
+    if (value is! List) {
+      throw const FormatException('Document lines must be a list.');
+    }
     return value.map((entry) {
       if (entry is! Map<String, dynamic>) {
         throw const FormatException('Document contains an invalid line item.');
@@ -143,10 +194,13 @@ class BusinessDocument {
 
   static List<BusinessDocument> decodeList(String source) {
     final decoded = jsonDecode(source);
-    if (decoded is! List) throw const FormatException('Saved documents must be a JSON list.');
+    if (decoded is! List) {
+      throw const FormatException('Saved documents must be a JSON list.');
+    }
     return decoded.map((entry) {
       if (entry is! Map<String, dynamic>) {
-        throw const FormatException('Saved documents contain an invalid record.');
+        throw const FormatException(
+            'Saved documents contain an invalid record.');
       }
       return BusinessDocument.fromJson(entry);
     }).toList();
