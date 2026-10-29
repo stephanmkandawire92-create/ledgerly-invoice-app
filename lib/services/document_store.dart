@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'cloud_storage_service.dart';
 import '../models/business_document.dart';
 import '../models/business_profile.dart';
 import '../models/customer.dart';
@@ -24,58 +25,101 @@ class DocumentStore {
   // A decoding error must reach the caller. Returning an empty collection here
   // makes damaged data look like a new workspace and risks overwriting it.
   Future<List<BusinessDocument>> load() async {
-    final prefs = await SharedPreferences.getInstance();
-    final source = prefs.getString(_storageKey);
+    final source = await _loadSource(_storageKey, 'documents');
     if (source == null || source.trim().isEmpty) return [];
     return BusinessDocument.decodeList(source);
   }
 
   Future<void> save(List<BusinessDocument> documents) async {
-    await _write(_storageKey, jsonEncode(documents.map((d) => d.toJson()).toList()));
+    final payload = documents.map((d) => d.toJson()).toList();
+    await _saveSource(_storageKey, 'documents', jsonEncode(payload), payload);
   }
 
   Future<List<Customer>> loadCustomers() async {
-    final prefs = await SharedPreferences.getInstance();
-    final source = prefs.getString(_customersKey);
+    final source = await _loadSource(_customersKey, 'customers');
     if (source == null || source.trim().isEmpty) return [];
     return Customer.decodeList(source);
   }
 
   Future<void> saveCustomers(List<Customer> customers) async {
-    await _write(_customersKey, Customer.encodeList(customers));
+    final payload = customers.map((customer) => customer.toJson()).toList();
+    await _saveSource(_customersKey, 'customers', jsonEncode(payload), payload);
   }
 
   Future<List<Item>> loadItems() async {
-    final prefs = await SharedPreferences.getInstance();
-    final source = prefs.getString(_itemsKey);
+    final source = await _loadSource(_itemsKey, 'items');
     if (source == null || source.trim().isEmpty) return [];
     return Item.decodeList(source);
   }
 
   Future<void> saveItems(List<Item> items) async {
-    await _write(_itemsKey, Item.encodeList(items));
+    final payload = items.map((item) => item.toJson()).toList();
+    await _saveSource(_itemsKey, 'items', jsonEncode(payload), payload);
   }
 
   Future<List<Payment>> loadPayments() async {
-    final prefs = await SharedPreferences.getInstance();
-    final source = prefs.getString(_paymentsKey);
+    final source = await _loadSource(_paymentsKey, 'payments');
     if (source == null || source.trim().isEmpty) return [];
     return Payment.decodeList(source);
   }
 
   Future<void> savePayments(List<Payment> payments) async {
-    await _write(_paymentsKey, Payment.encodeList(payments));
+    final payload = payments.map((payment) => payment.toJson()).toList();
+    await _saveSource(_paymentsKey, 'payments', jsonEncode(payload), payload);
   }
 
   Future<BusinessProfile> loadProfile() async {
-    final prefs = await SharedPreferences.getInstance();
-    final source = prefs.getString(_profileKey);
+    final source = await _loadSource(_profileKey, 'profile');
     if (source == null || source.trim().isEmpty) return BusinessProfile();
     return BusinessProfile.decode(source);
   }
 
   Future<void> saveProfile(BusinessProfile profile) async {
-    await _write(_profileKey, profile.encode());
+    await _saveSource(_profileKey, 'profile', profile.encode(), profile.toJson());
+  }
+
+  Future<String?> _loadSource(String key, String section) async {
+    final prefs = await SharedPreferences.getInstance();
+    final localSource = prefs.getString(key);
+    if (!await CloudStorageService.instance.isCloudMode) return localSource;
+
+    // In cloud mode, never silently substitute a stale local cache after a
+    // network error or missing cloud section. The caller shows a load error;
+    // the user can explicitly switch to local mode instead.
+    final payload = await CloudStorageService.instance.loadSection(section);
+    if (payload == null) {
+      throw StateError(
+        'The cloud workspace is missing the "$section" section. Choose a migration option before continuing.',
+      );
+    }
+    final source = jsonEncode(payload);
+    try {
+      // Cache only the last successfully fetched cloud copy.
+      await prefs.setString(key, source);
+    } catch (_) {
+      // The cloud response is still authoritative if local caching fails.
+    }
+    return source;
+  }
+
+  Future<void> _saveSource(
+    String key,
+    String section,
+    String source,
+    Object payload,
+  ) async {
+    if (await CloudStorageService.instance.isCloudMode) {
+      // Write to the server first so failed cloud writes are never reported as
+      // synced. Local mode remains available separately from cloud mode.
+      await CloudStorageService.instance.saveSection(section, payload);
+      try {
+        await _write(key, source);
+      } catch (_) {
+        // The server is authoritative in cloud mode; the cache is best effort.
+      }
+      return;
+    }
+    await _write(key, source);
   }
 
   Future<void> _write(String key, String value) async {
@@ -83,6 +127,41 @@ class DocumentStore {
     if (!await prefs.setString(key, value)) {
       throw StateError('Could not persist Ledgerly data for key: $key');
     }
+  }
+
+  /// Exports the current device copy specifically, regardless of whether
+  /// cloud mode is enabled. Used to show a safe migration choice.
+  Future<String> exportLocalBackup() async {
+    final prefs = await SharedPreferences.getInstance();
+    final docsSource = prefs.getString(_storageKey);
+    final customersSource = prefs.getString(_customersKey);
+    final itemsSource = prefs.getString(_itemsKey);
+    final paymentsSource = prefs.getString(_paymentsKey);
+    final profileSource = prefs.getString(_profileKey);
+    final docs = docsSource == null || docsSource.trim().isEmpty
+        ? <BusinessDocument>[]
+        : BusinessDocument.decodeList(docsSource);
+    final customers = customersSource == null || customersSource.trim().isEmpty
+        ? <Customer>[]
+        : Customer.decodeList(customersSource);
+    final items = itemsSource == null || itemsSource.trim().isEmpty
+        ? <Item>[]
+        : Item.decodeList(itemsSource);
+    final payments = paymentsSource == null || paymentsSource.trim().isEmpty
+        ? <Payment>[]
+        : Payment.decodeList(paymentsSource);
+    final profile = profileSource == null || profileSource.trim().isEmpty
+        ? BusinessProfile()
+        : BusinessProfile.decode(profileSource);
+    return const JsonEncoder.withIndent('  ').convert({
+      'version': 1,
+      'exportedAt': DateTime.now().toIso8601String(),
+      'documents': docs.map((d) => d.toJson()).toList(),
+      'customers': customers.map((c) => c.toJson()).toList(),
+      'items': items.map((i) => i.toJson()).toList(),
+      'payments': payments.map((p) => p.toJson()).toList(),
+      'profile': profile.toJson(),
+    });
   }
 
   Future<String> exportBackup() async {
@@ -166,6 +245,15 @@ class DocumentStore {
     final invoiceIds = docs.where((d) => d.kind == DocumentKind.invoice).map((d) => d.id).toSet();
     if (payments.any((p) => !invoiceIds.contains(p.invoiceId))) {
       throw const FormatException('Backup contains a payment linked to a missing invoice.');
+    }
+
+    // Importing a backup while cloud mode is active must update the cloud
+    // workspace too. The Settings UI explicitly warns that this replaces data.
+    if (await CloudStorageService.instance.isCloudMode) {
+      await CloudStorageService.instance.uploadBackup(
+        jsonSource,
+        allowOverwrite: true,
+      );
     }
 
     final values = <String, String>{

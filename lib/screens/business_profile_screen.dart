@@ -5,6 +5,7 @@ import 'package:image_picker/image_picker.dart';
 import '../models/business_profile.dart';
 import '../models/currency_helper.dart';
 import '../services/app_translations.dart';
+import 'cloud_storage_screen.dart';
 import '../services/document_store.dart';
 import '../services/subscription_service.dart';
 import 'paywall_screen.dart';
@@ -314,6 +315,24 @@ class _BusinessProfileScreenState extends State<BusinessProfileScreen> {
                     label: Text(AppTranslations.get('saveSettings', _languageCode)),
                   ),
                 ],
+              ),
+              const SizedBox(height: 20),
+              Card(
+                child: ListTile(
+                  leading: const Icon(Icons.cloud_sync_outlined, color: Color(0xFF4F46E5), size: 30),
+                  title: const Text('Cloud backup & sync', style: TextStyle(fontWeight: FontWeight.w700)),
+                  subtitle: const Text('Optional. Keep records on this device or sign in to back them up and sync supported devices.'),
+                  trailing: const Icon(Icons.chevron_right),
+                  onTap: () {
+                    Navigator.of(context).push(
+                      MaterialPageRoute<void>(
+                        builder: (_) => CloudStorageScreen(
+                          onWorkspaceChanged: widget.onDataImported,
+                        ),
+                      ),
+                    );
+                  },
+                ),
               ),
               const SizedBox(height: 20),
               // Company Logo & Language Card

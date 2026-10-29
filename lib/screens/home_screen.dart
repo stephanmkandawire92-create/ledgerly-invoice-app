@@ -15,6 +15,7 @@ import '../models/customer.dart';
 import '../models/item.dart';
 import '../models/payment.dart';
 import '../services/app_translations.dart';
+import '../services/cloud_storage_service.dart';
 import '../services/document_store.dart';
 import 'analytics_screen.dart';
 import 'business_profile_screen.dart';
@@ -104,9 +105,20 @@ class _HomeScreenState extends State<HomeScreen> {
       if (mounted) setState(() => _loadError = null);
       return true;
     } catch (_) {
+      final cloudMode = await CloudStorageService.instance.isCloudMode;
       if (mounted) {
+        if (cloudMode) {
+          setState(() => _loadError =
+              'Cloud changes could not be saved. The cloud copy was not overwritten. Refresh the workspace before editing again.');
+        }
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Could not save to this device. Check available storage and try again.')),
+          SnackBar(
+            content: Text(
+              cloudMode
+                  ? 'Could not sync to cloud. Check the connection or refresh if another device changed these records.'
+                  : 'Could not save to this device. Check available storage and try again.',
+            ),
+          ),
         );
       }
       return false;
