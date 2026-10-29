@@ -71,52 +71,76 @@ Deno.serve(async (req) => {
       return json({ error: "Could not verify subscription status" }, 502);
     }
     const sub = await subResponse.json();
-    const userId = sub.custom_id;
+    const [userId, checkoutRequestId] = String(sub.custom_id ?? "").split(":", 2);
     if (typeof userId !== "string" || !/^[0-9a-f]{8}-[0-9a-f-]{27,}$/i.test(userId)) {
       return json({ error: "Subscription has no valid Ledgerly account reference" }, 400);
     }
 
-    const eventStatuses: Record<string, string> = {
-      "BILLING.SUBSCRIPTION.ACTIVATED": "active",
-      "BILLING.SUBSCRIPTION.UPDATED": sub.status === "ACTIVE" ? "active" : "pending",
-      "BILLING.SUBSCRIPTION.CANCELLED": "cancelled",
-      "BILLING.SUBSCRIPTION.EXPIRED": "expired",
-      "BILLING.SUBSCRIPTION.SUSPENDED": "suspended",
-      "BILLING.SUBSCRIPTION.PAYMENT.FAILED": "past_due",
-      "PAYMENT.SALE.COMPLETED": "active",
-      "PAYMENT.SALE.REFUNDED": "past_due",
-      "PAYMENT.SALE.REVERSED": "past_due",
+    // The event can be delayed or delivered out of order. Use PayPal's current
+    // subscription state as the source of truth instead of replaying the state
+    // implied by an older event (for example, a late sale completion after cancel).
+    const canonicalStatuses: Record<string, string> = {
+      ACTIVE: "active",
+      CANCELLED: "cancelled",
+      EXPIRED: "expired",
+      SUSPENDED: "suspended",
+      APPROVAL_PENDING: "pending",
+      APPROVED: "pending",
     };
-    const status = eventStatuses[type];
+    let status = canonicalStatuses[String(sub.status ?? "")];
+    if (type === "PAYMENT.SALE.REFUNDED" || type === "PAYMENT.SALE.REVERSED") {
+      status = "past_due";
+    }
     if (!status) {
       await admin.from("billing_webhook_events").insert({ provider: "paypal", event_id: eventId });
       return json({ received: true, ignored: true });
     }
 
+    const providerStatusTime = Date.parse(String(sub.status_update_time ?? ""));
+    if (!Number.isFinite(providerStatusTime)) {
+      return json({ error: "PayPal subscription has no valid status version" }, 502);
+    }
+    const eventTime = Date.parse(String(event.create_time ?? ""));
+    const versionTime = Number.isFinite(eventTime)
+      ? Math.max(providerStatusTime, eventTime)
+      : providerStatusTime;
     const nextBilling = sub.billing_info?.next_billing_time;
-    const { data: previous } = await admin.from("subscription_entitlements")
-      .select("current_period_end")
-      .eq("provider", "paypal")
-      .eq("external_subscription_id", subscriptionId)
-      .maybeSingle();
-    // PayPal may omit next_billing_time after cancellation. Preserve the previously
-    // verified paid-through date rather than revoking access immediately.
-    const end = typeof nextBilling === "string"
-      ? new Date(nextBilling).toISOString()
-      : previous?.current_period_end ?? null;
-    const { error: upsertError } = await admin.from("subscription_entitlements").upsert({
-      user_id: userId,
-      provider: "paypal",
-      external_subscription_id: subscriptionId,
-      product_id: sub.plan_id ?? null,
-      status,
-      current_period_end: end,
-      last_event_id: eventId,
-      updated_at: new Date().toISOString(),
-    }, { onConflict: "provider,external_subscription_id" });
+    const endDate = typeof nextBilling === "string" ? new Date(nextBilling) : null;
+    if (endDate && !Number.isFinite(endDate.getTime())) {
+      return json({ error: "PayPal subscription has an invalid billing period end" }, 502);
+    }
+    // The database RPC preserves a prior verified end when PayPal omits it and
+    // rejects stale status versions atomically. A cancelled row with no known end
+    // does not imply that the account has paid-through access.
+    const { data: applied, error: upsertError } = await admin.rpc(
+      "apply_paypal_entitlement",
+      {
+        p_user_id: userId,
+        p_subscription_id: subscriptionId,
+        p_product_id: sub.plan_id ?? null,
+        p_status: status,
+        p_period_end: endDate?.toISOString() ?? null,
+        p_event_id: eventId,
+        p_status_updated_at: new Date(versionTime).toISOString(),
+      },
+    );
     if (upsertError) {
       console.error("PayPal entitlement update failed", upsertError);
       return json({ error: "Could not update subscription status" }, 500);
+    }
+    if (applied && checkoutRequestId && /^[0-9a-f-]{36}$/i.test(checkoutRequestId)) {
+      const { error: checkoutError } = await admin.from("paypal_checkout_attempts")
+        .update({
+          subscription_id: subscriptionId,
+          status,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("request_id", checkoutRequestId)
+        .eq("user_id", userId);
+      if (checkoutError) {
+        console.error("PayPal checkout reservation update failed", checkoutError);
+        return json({ error: "Could not update checkout state" }, 500);
+      }
     }
     // Record only after the entitlement write succeeds, so PayPal retries can recover failures.
     const { error: recordError } = await admin.from("billing_webhook_events")

@@ -1,0 +1,56 @@
+# Miscellaneous
+*.class
+*.log
+*.pyc
+*.swp
+.DS_Store
+.atom/
+.build/
+.buildlog/
+.history
+.svn/
+.swiftpm/
+migrate_working_dir/
+
+# IDE files
+*.iml
+*.ipr
+*.iws
+.idea/
+
+# Flutter/Dart/Pub generated files
+**/doc/api/
+**/ios/Flutter/.last_build_id
+.dart_tool/
+.flutter-plugins-dependencies
+.pub-cache/
+.pub/
+/build/
+/coverage/
+.widget_preview/
+
+# Local configuration and credentials
+.env
+.env.*
+!.env.example
+
+# Windows Store/local packaging outputs and private signing materials
+/dist/
+/*.msix
+/*.msixbundle
+/*.appx
+/*.appxbundle
+*.pfx
+*.p12
+*.cer
+*.pvk
+/.winapp/
+
+# Android generated output (if native support is added later)
+/android/app/debug
+/android/app/profile
+/android/app/release
+
+# Flutter symbolication/obfuscation output
+app.*.symbols
+app.*.map.json

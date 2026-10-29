@@ -1,16 +1,19 @@
 import 'package:flutter/material.dart';
 import 'package:uuid/uuid.dart';
 import '../models/item.dart';
+import '../models/currency_helper.dart';
 import '../services/document_store.dart';
 
 class ItemsScreen extends StatefulWidget {
   const ItemsScreen({
     super.key,
     required this.items,
+    required this.currencyCode,
     required this.onItemsUpdated,
   });
 
   final List<Item> items;
+  final String currencyCode;
   final ValueChanged<List<Item>> onItemsUpdated;
 
   @override
@@ -27,7 +30,8 @@ class _ItemsScreenState extends State<ItemsScreen> {
   void initState() {
     super.initState();
     _searchController.addListener(() {
-      setState(() => _searchQuery = _searchController.text.trim().toLowerCase());
+      setState(
+          () => _searchQuery = _searchController.text.trim().toLowerCase());
     });
   }
 
@@ -56,7 +60,8 @@ class _ItemsScreenState extends State<ItemsScreen> {
         text: existing != null ? existing.unitPrice.toStringAsFixed(2) : '');
     final taxCtrl = TextEditingController(
         text: existing != null ? existing.taxRate.toStringAsFixed(1) : '15.0');
-    final catCtrl = TextEditingController(text: existing?.category ?? 'Services');
+    final catCtrl =
+        TextEditingController(text: existing?.category ?? 'Services');
     final formKey = GlobalKey<FormState>();
 
     final result = await showDialog<Item>(
@@ -74,7 +79,9 @@ class _ItemsScreenState extends State<ItemsScreen> {
                   TextFormField(
                     controller: nameCtrl,
                     decoration: const InputDecoration(labelText: 'Item Name *'),
-                    validator: (v) => v == null || v.trim().isEmpty ? 'Name is required' : null,
+                    validator: (v) => v == null || v.trim().isEmpty
+                        ? 'Name is required'
+                        : null,
                   ),
                   const SizedBox(height: 12),
                   Row(
@@ -82,12 +89,19 @@ class _ItemsScreenState extends State<ItemsScreen> {
                       Expanded(
                         child: TextFormField(
                           controller: priceCtrl,
-                          keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                          decoration: const InputDecoration(labelText: 'Unit Price *'),
+                          keyboardType: const TextInputType.numberWithOptions(
+                              decimal: true),
+                          decoration:
+                              const InputDecoration(labelText: 'Unit Price *'),
                           validator: (v) {
-                            if (v == null || v.trim().isEmpty) return 'Required';
+                            if (v == null || v.trim().isEmpty) {
+                              return 'Required';
+                            }
                             final value = double.tryParse(v.trim());
-                            if (value == null || !value.isFinite || value < 0 || value > 1e12) {
+                            if (value == null ||
+                                !value.isFinite ||
+                                value < 0 ||
+                                value > 1e12) {
                               return 'Enter a valid non-negative price';
                             }
                             return null;
@@ -98,7 +112,8 @@ class _ItemsScreenState extends State<ItemsScreen> {
                       Expanded(
                         child: TextFormField(
                           controller: unitCtrl,
-                          decoration: const InputDecoration(labelText: 'Unit (e.g. hrs, pcs)'),
+                          decoration: const InputDecoration(
+                              labelText: 'Unit (e.g. hrs, pcs)'),
                         ),
                       ),
                     ],
@@ -109,18 +124,24 @@ class _ItemsScreenState extends State<ItemsScreen> {
                       Expanded(
                         child: TextFormField(
                           controller: skuCtrl,
-                          decoration: const InputDecoration(labelText: 'SKU / Code'),
+                          decoration:
+                              const InputDecoration(labelText: 'SKU / Code'),
                         ),
                       ),
                       const SizedBox(width: 12),
                       Expanded(
                         child: TextFormField(
                           controller: taxCtrl,
-                          keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                          decoration: const InputDecoration(labelText: 'Tax Rate (%)'),
+                          keyboardType: const TextInputType.numberWithOptions(
+                              decimal: true),
+                          decoration:
+                              const InputDecoration(labelText: 'Tax Rate (%)'),
                           validator: (v) {
                             final value = double.tryParse((v ?? '').trim());
-                            if (value == null || !value.isFinite || value < 0 || value > 100) {
+                            if (value == null ||
+                                !value.isFinite ||
+                                value < 0 ||
+                                value > 100) {
                               return 'Enter a tax rate from 0 to 100';
                             }
                             return null;
@@ -138,7 +159,8 @@ class _ItemsScreenState extends State<ItemsScreen> {
                   TextFormField(
                     controller: descCtrl,
                     maxLines: 2,
-                    decoration: const InputDecoration(labelText: 'Default Description'),
+                    decoration:
+                        const InputDecoration(labelText: 'Default Description'),
                   ),
                 ],
               ),
@@ -151,20 +173,42 @@ class _ItemsScreenState extends State<ItemsScreen> {
             child: const Text('Cancel'),
           ),
           FilledButton(
-            onPressed: () {
+            onPressed: () async {
               if (formKey.currentState?.validate() != true) return;
               final item = Item(
                 id: existing?.id ?? _uuid.v4(),
                 name: nameCtrl.text.trim(),
                 description: descCtrl.text.trim(),
                 sku: skuCtrl.text.trim(),
-                unit: unitCtrl.text.trim().isEmpty ? 'pcs' : unitCtrl.text.trim(),
+                unit:
+                    unitCtrl.text.trim().isEmpty ? 'pcs' : unitCtrl.text.trim(),
                 unitPrice: double.tryParse(priceCtrl.text.trim()) ?? 0.0,
                 taxRate: double.tryParse(taxCtrl.text.trim()) ?? 15.0,
-                category: catCtrl.text.trim().isEmpty ? 'General' : catCtrl.text.trim(),
+                category: catCtrl.text.trim().isEmpty
+                    ? 'General'
+                    : catCtrl.text.trim(),
                 createdAt: existing?.createdAt ?? DateTime.now(),
               );
-              Navigator.pop(ctx, item);
+              final updatedList = List<Item>.from(widget.items);
+              final index =
+                  updatedList.indexWhere((saved) => saved.id == item.id);
+              if (index >= 0) {
+                updatedList[index] = item;
+              } else {
+                updatedList.add(item);
+              }
+              try {
+                await _store.saveItems(updatedList);
+                if (ctx.mounted) Navigator.pop(ctx, item);
+              } catch (_) {
+                if (mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                        content: Text(
+                            'Could not save this item. Check device storage and try again.')),
+                  );
+                }
+              }
             },
             child: Text(existing == null ? 'Add Item' : 'Save Changes'),
           ),
@@ -172,6 +216,13 @@ class _ItemsScreenState extends State<ItemsScreen> {
       ),
     );
 
+    nameCtrl.dispose();
+    descCtrl.dispose();
+    skuCtrl.dispose();
+    unitCtrl.dispose();
+    priceCtrl.dispose();
+    taxCtrl.dispose();
+    catCtrl.dispose();
     if (result == null) return;
     final updatedList = List<Item>.from(widget.items);
     final idx = updatedList.indexWhere((i) => i.id == result.id);
@@ -180,7 +231,6 @@ class _ItemsScreenState extends State<ItemsScreen> {
     } else {
       updatedList.add(result);
     }
-    await _store.saveItems(updatedList);
     widget.onItemsUpdated(updatedList);
   }
 
@@ -196,7 +246,8 @@ class _ItemsScreenState extends State<ItemsScreen> {
             child: const Text('Cancel'),
           ),
           FilledButton(
-            style: FilledButton.styleFrom(backgroundColor: const Color(0xFFB42318)),
+            style: FilledButton.styleFrom(
+                backgroundColor: const Color(0xFFB42318)),
             onPressed: () => Navigator.pop(ctx, true),
             child: const Text('Delete'),
           ),
@@ -206,7 +257,18 @@ class _ItemsScreenState extends State<ItemsScreen> {
 
     if (confirm != true) return;
     final updatedList = widget.items.where((i) => i.id != item.id).toList();
-    await _store.saveItems(updatedList);
+    try {
+      await _store.saveItems(updatedList);
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+              content: Text(
+                  'Could not delete this item. Check device storage and try again.')),
+        );
+      }
+      return;
+    }
     widget.onItemsUpdated(updatedList);
   }
 
@@ -233,10 +295,13 @@ class _ItemsScreenState extends State<ItemsScreen> {
                           style: Theme.of(context)
                               .textTheme
                               .headlineMedium
-                              ?.copyWith(color: const Color(0xFF172033), fontSize: wide ? 30 : 25),
+                              ?.copyWith(
+                                  color: const Color(0xFF172033),
+                                  fontSize: wide ? 30 : 25),
                         ),
                         const SizedBox(height: 6),
-                        const Text('Manage products, services, default unit prices and tax rates.'),
+                        const Text(
+                            'Manage products, services, default unit prices and tax rates.'),
                       ],
                     ),
                   ),
@@ -270,14 +335,19 @@ class _ItemsScreenState extends State<ItemsScreen> {
                       child: Column(
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          const Icon(Icons.inventory_2_outlined, size: 48, color: Color(0xFF7B8497)),
+                          const Icon(Icons.inventory_2_outlined,
+                              size: 48, color: Color(0xFF7B8497)),
                           const SizedBox(height: 12),
                           Text(
-                            _searchQuery.isNotEmpty ? 'No matching items found' : 'No items saved yet',
-                            style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                            _searchQuery.isNotEmpty
+                                ? 'No matching items found'
+                                : 'No items saved yet',
+                            style: const TextStyle(
+                                fontSize: 18, fontWeight: FontWeight.bold),
                           ),
                           const SizedBox(height: 6),
-                          const Text('Add reusable products and services to auto-fill document line items.'),
+                          const Text(
+                              'Add reusable products and services to auto-fill document line items.'),
                           const SizedBox(height: 16),
                           FilledButton.icon(
                             onPressed: () => _openItemDialog(),
@@ -299,26 +369,32 @@ class _ItemsScreenState extends State<ItemsScreen> {
                     itemBuilder: (context, index) {
                       final item = _filteredItems[index];
                       return ListTile(
-                        contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+                        contentPadding: const EdgeInsets.symmetric(
+                            horizontal: 20, vertical: 8),
                         leading: CircleAvatar(
-                          backgroundColor: const Color(0xFF4F46E5).withValues(alpha: 0.1),
+                          backgroundColor:
+                              const Color(0xFF4F46E5).withValues(alpha: 0.1),
                           foregroundColor: const Color(0xFF4F46E5),
-                          child: const Icon(Icons.shopping_bag_outlined, size: 20),
+                          child:
+                              const Icon(Icons.shopping_bag_outlined, size: 20),
                         ),
                         title: Text(
                           item.name,
-                          style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+                          style: const TextStyle(
+                              fontWeight: FontWeight.bold, fontSize: 16),
                         ),
                         subtitle: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Text('${item.category} • SKU: ${item.sku.isNotEmpty ? item.sku : 'N/A'} • Tax: ${item.taxRate}%'),
+                            Text(
+                                '${item.category} • SKU: ${item.sku.isNotEmpty ? item.sku : 'N/A'} • Tax: ${item.taxRate}%'),
                             if (item.description.isNotEmpty)
                               Text(
                                 item.description,
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
-                                style: const TextStyle(fontSize: 12, color: Color(0xFF7B8497)),
+                                style: const TextStyle(
+                                    fontSize: 12, color: Color(0xFF7B8497)),
                               ),
                           ],
                         ),
@@ -329,10 +405,15 @@ class _ItemsScreenState extends State<ItemsScreen> {
                               mainAxisAlignment: MainAxisAlignment.center,
                               crossAxisAlignment: CrossAxisAlignment.end,
                               children: [
-                                const Text('Unit Price', style: TextStyle(fontSize: 11, color: Color(0xFF7B8497))),
+                                const Text('Unit Price',
+                                    style: TextStyle(
+                                        fontSize: 11,
+                                        color: Color(0xFF7B8497))),
                                 Text(
-                                  'R ${item.unitPrice.toStringAsFixed(2)} / ${item.unit}',
-                                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+                                  '${CurrencyHelper.format(item.unitPrice, widget.currencyCode)} / ${item.unit}',
+                                  style: const TextStyle(
+                                      fontWeight: FontWeight.bold,
+                                      fontSize: 14),
                                 ),
                               ],
                             ),
@@ -342,7 +423,8 @@ class _ItemsScreenState extends State<ItemsScreen> {
                               onPressed: () => _openItemDialog(existing: item),
                             ),
                             IconButton(
-                              icon: const Icon(Icons.delete_outline, size: 20, color: Color(0xFFB42318)),
+                              icon: const Icon(Icons.delete_outline,
+                                  size: 20, color: Color(0xFFB42318)),
                               onPressed: () => _deleteItem(item),
                             ),
                           ],

@@ -22,8 +22,10 @@ class SubscriptionService extends ChangeNotifier {
   bool get isPro => _isPro;
   bool get isInitialized => _initialized;
   bool get isBackendReady => _backendReady;
-  bool get isSignedIn => _backendReady && Supabase.instance.client.auth.currentUser != null;
-  String? get currentUserId => _backendReady ? Supabase.instance.client.auth.currentUser?.id : null;
+  bool get isSignedIn =>
+      _backendReady && Supabase.instance.client.auth.currentUser != null;
+  String? get currentUserId =>
+      _backendReady ? Supabase.instance.client.auth.currentUser?.id : null;
   String? get planType => _planType;
   String? get subscriptionId => _subscriptionId;
   DateTime? get expiresAt => _expiresAt;
@@ -63,15 +65,32 @@ class SubscriptionService extends ChangeNotifier {
     await _onAuthenticated();
   }
 
-  Future<void> createAccount({required String email, required String password}) async {
+  Future<void> createAccount(
+      {required String email, required String password}) async {
     _requireBackend();
+    final redirectTo = _resolveSignUpRedirectUrl();
     await Supabase.instance.client.auth.signUp(
       email: email.trim(),
       password: password,
+      emailRedirectTo: redirectTo,
     );
     if (Supabase.instance.client.auth.currentUser != null) {
       await _onAuthenticated();
     }
+  }
+
+  String _resolveSignUpRedirectUrl() {
+    const configured = String.fromEnvironment('SUPABASE_AUTH_REDIRECT_URL');
+    if (configured.trim().isNotEmpty) return configured.trim();
+    if (kIsWeb) {
+      final origin = Uri.base.origin;
+      if (origin.startsWith('http://') || origin.startsWith('https://')) {
+        return origin;
+      }
+    }
+    throw StateError(
+      'Set SUPABASE_AUTH_REDIRECT_URL to a registered Ledgerly confirmation-return URL before creating accounts in this desktop build.',
+    );
   }
 
   Future<void> signOut() async {
@@ -86,7 +105,8 @@ class SubscriptionService extends ChangeNotifier {
 
   void _requireBackend() {
     if (!_backendReady) {
-      throw StateError('Supabase is not configured. Add SUPABASE_URL and SUPABASE_PUBLISHABLE_KEY at build time.');
+      throw StateError(
+          'Supabase is not configured. Add SUPABASE_URL and SUPABASE_PUBLISHABLE_KEY at build time.');
     }
   }
 
@@ -105,10 +125,12 @@ class SubscriptionService extends ChangeNotifier {
     }
     const androidKey = String.fromEnvironment('REVENUECAT_ANDROID_API_KEY');
     const iosKey = String.fromEnvironment('REVENUECAT_IOS_API_KEY');
-    final key = defaultTargetPlatform == TargetPlatform.android ? androidKey : iosKey;
+    final key =
+        defaultTargetPlatform == TargetPlatform.android ? androidKey : iosKey;
     if (key.isEmpty) return;
     if (!_revenueCatConfigured) {
-      await Purchases.configure(PurchasesConfiguration(key)..appUserID = userId);
+      await Purchases.configure(
+          PurchasesConfiguration(key)..appUserID = userId);
       _revenueCatConfigured = true;
     } else {
       await Purchases.logIn(userId);
@@ -134,7 +156,8 @@ class SubscriptionService extends ChangeNotifier {
     try {
       final rows = await Supabase.instance.client
           .from('subscription_entitlements')
-          .select('provider, external_subscription_id, status, current_period_end, product_id')
+          .select(
+              'provider, external_subscription_id, status, current_period_end, product_id')
           .eq('user_id', user.id)
           .order('updated_at', ascending: false);
       final now = DateTime.now().toUtc();
@@ -171,7 +194,8 @@ class SubscriptionService extends ChangeNotifier {
     if (kIsWeb ||
         !(defaultTargetPlatform == TargetPlatform.android ||
             defaultTargetPlatform == TargetPlatform.iOS)) {
-      throw UnsupportedError('App-store purchases are only supported on iOS and Android.');
+      throw UnsupportedError(
+          'App-store purchases are only supported on iOS and Android.');
     }
     await _configureRevenueCat(user.id);
     if (!_revenueCatConfigured) {
@@ -179,10 +203,16 @@ class SubscriptionService extends ChangeNotifier {
     }
     final offerings = await Purchases.getOfferings();
     final package = offerings.current?.monthly;
-    if (package == null) throw StateError('No monthly product is configured in RevenueCat.');
+    if (package == null) {
+      throw StateError('No monthly product is configured in RevenueCat.');
+    }
     final result = await Purchases.purchase(PurchaseParams.package(package));
-    final active = result.customerInfo.entitlements.active.containsKey(proEntitlement);
-    if (!active) throw StateError('The purchase completed but the Ledgerly Pro entitlement is not active.');
+    final active =
+        result.customerInfo.entitlements.active.containsKey(proEntitlement);
+    if (!active) {
+      throw StateError(
+          'The purchase completed but the Ledgerly Pro entitlement is not active.');
+    }
     await refreshEntitlement();
     if (!_isPro) {
       _isPro = true;
@@ -202,7 +232,8 @@ class SubscriptionService extends ChangeNotifier {
       throw StateError('RevenueCat is not configured for this platform.');
     }
     final info = await Purchases.restorePurchases();
-    final hasVerifiedEntitlement = info.entitlements.active.containsKey(proEntitlement);
+    final hasVerifiedEntitlement =
+        info.entitlements.active.containsKey(proEntitlement);
     await refreshEntitlement();
     if (!_isPro && hasVerifiedEntitlement) {
       _isPro = true;
@@ -218,9 +249,12 @@ class SubscriptionService extends ChangeNotifier {
     if (Supabase.instance.client.auth.currentUser == null) {
       throw StateError('Sign in before subscribing.');
     }
-    final response = await Supabase.instance.client.functions.invoke('paypal-create-subscription');
+    final response = await Supabase.instance.client.functions
+        .invoke('paypal-create-subscription');
     final data = response.data;
-    if (response.status < 200 || response.status >= 300 || data is! Map ||
+    if (response.status < 200 ||
+        response.status >= 300 ||
+        data is! Map ||
         data['approvalUrl'] is! String) {
       throw StateError(data is Map && data['error'] is String
           ? data['error'] as String
@@ -233,7 +267,9 @@ class SubscriptionService extends ChangeNotifier {
       'paypal.com',
       'sandbox.paypal.com',
     };
-    if (uri == null || uri.scheme != 'https' || !paypalHosts.contains(uri.host)) {
+    if (uri == null ||
+        uri.scheme != 'https' ||
+        !paypalHosts.contains(uri.host)) {
       throw StateError('PayPal returned an invalid checkout URL.');
     }
     return launchUrl(uri, mode: LaunchMode.externalApplication);
@@ -245,7 +281,8 @@ class SubscriptionService extends ChangeNotifier {
     bool isTrial = false,
     Duration? customDuration,
   }) async {
-    throw UnsupportedError('Manual Pro activation is disabled for payment security.');
+    throw UnsupportedError(
+        'Manual Pro activation is disabled for payment security.');
   }
 
   Future<void> toggleDemoPro() async {
@@ -253,6 +290,7 @@ class SubscriptionService extends ChangeNotifier {
   }
 
   Future<void> cancelSubscription() async {
-    throw UnsupportedError('Manage or cancel your subscription with the original payment provider.');
+    throw UnsupportedError(
+        'Manage or cancel your subscription with the original payment provider.');
   }
 }

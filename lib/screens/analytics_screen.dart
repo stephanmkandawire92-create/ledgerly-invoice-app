@@ -26,13 +26,17 @@ class AnalyticsScreen extends StatelessWidget {
 
   BusinessDocument? _invoiceForPayment(Payment payment) {
     for (final document in documents) {
-      if (document.id == payment.invoiceId && document.kind == DocumentKind.invoice) return document;
+      if (document.id == payment.invoiceId &&
+          document.kind == DocumentKind.invoice) {
+        return document;
+      }
     }
     return null;
   }
 
   double _paidForInvoice(String invoiceId) => payments
-      .where((p) => p.invoiceId == invoiceId && p.amount.isFinite && p.amount > 0)
+      .where(
+          (p) => p.invoiceId == invoiceId && p.amount.isFinite && p.amount > 0)
       .fold<double>(0, (sum, p) => sum + p.amount);
 
   double get _totalInvoiced => documents
@@ -41,20 +45,27 @@ class AnalyticsScreen extends StatelessWidget {
 
   double get _totalCollected => payments.fold<double>(0, (sum, p) {
         final invoice = _invoiceForPayment(p);
-        if (invoice == null || invoice.currencyCode.toUpperCase() != currencyCode.toUpperCase() ||
-            p.amount.isNaN || p.amount.isInfinite || p.amount <= 0) {
+        if (invoice == null ||
+            invoice.currencyCode.toUpperCase() != currencyCode.toUpperCase() ||
+            p.amount.isNaN ||
+            p.amount.isInfinite ||
+            p.amount <= 0) {
           return sum;
         }
         return sum + p.amount;
       });
 
-  double get _totalOutstanding => documents.where(_isReportableInvoice).fold<double>(0, (sum, d) {
-        final remaining = (d.total - _paidForInvoice(d.id)).clamp(0.0, d.total).toDouble();
+  double get _totalOutstanding =>
+      documents.where(_isReportableInvoice).fold<double>(0, (sum, d) {
+        final remaining =
+            (d.total - _paidForInvoice(d.id)).clamp(0.0, d.total).toDouble();
         return sum + remaining;
       });
 
   int get _overdueCount => documents
-      .where((d) => _isReportableInvoice(d) && d.status == 'Overdue')
+      .where((d) =>
+          _isReportableInvoice(d) &&
+          effectiveInvoiceStatus(d, payments) == 'Overdue')
       .length;
 
   int get _totalQuotes =>
@@ -70,7 +81,9 @@ class AnalyticsScreen extends StatelessWidget {
   Map<String, double> get _clientRevenueMap {
     final Map<String, double> map = {};
     for (final doc in documents.where(_isReportableInvoice)) {
-      final name = doc.clientName.trim().isEmpty ? 'Unnamed Client' : doc.clientName.trim();
+      final name = doc.clientName.trim().isEmpty
+          ? 'Unnamed Client'
+          : doc.clientName.trim();
       map[name] = (map[name] ?? 0.0) + doc.total;
     }
     return map;
@@ -127,7 +140,8 @@ class AnalyticsScreen extends StatelessWidget {
                         borderRadius: BorderRadius.circular(16),
                         boxShadow: [
                           BoxShadow(
-                            color: const Color(0xFF4F46E5).withValues(alpha: 0.25),
+                            color:
+                                const Color(0xFF4F46E5).withValues(alpha: 0.25),
                             blurRadius: 16,
                             offset: const Offset(0, 4),
                           ),
@@ -141,7 +155,8 @@ class AnalyticsScreen extends StatelessWidget {
                               color: Colors.white.withValues(alpha: 0.18),
                               borderRadius: BorderRadius.circular(12),
                             ),
-                            child: const Icon(Icons.workspace_premium_rounded, color: Color(0xFFFBBF24), size: 28),
+                            child: const Icon(Icons.workspace_premium_rounded,
+                                color: Color(0xFFFBBF24), size: 28),
                           ),
                           const SizedBox(width: 16),
                           Expanded(
@@ -170,20 +185,25 @@ class AnalyticsScreen extends StatelessWidget {
                           const SizedBox(width: 14),
                           FilledButton(
                             style: FilledButton.styleFrom(
-                              backgroundColor: const Color(0xFFFFC439), // PayPal Gold
+                              backgroundColor:
+                                  const Color(0xFFFFC439), // PayPal Gold
                               foregroundColor: const Color(0xFF003087),
-                              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 16, vertical: 12),
                             ),
                             onPressed: () => PaywallScreen.showPaywall(
                               context,
-                              featurePrompt: 'Unlock Advanced Financial & Client Analytics',
+                              featurePrompt:
+                                  'Unlock Advanced Financial & Client Analytics',
                             ),
                             child: const Row(
                               mainAxisSize: MainAxisSize.min,
                               children: [
                                 Icon(Icons.bolt_rounded, size: 18),
                                 SizedBox(width: 4),
-                                Text('Upgrade', style: TextStyle(fontWeight: FontWeight.bold)),
+                                Text('Upgrade',
+                                    style:
+                                        TextStyle(fontWeight: FontWeight.bold)),
                               ],
                             ),
                           ),
@@ -192,132 +212,164 @@ class AnalyticsScreen extends StatelessWidget {
                     ),
                   Text(
                     'Company Performance & Analytics',
-                    style: Theme.of(context)
-                        .textTheme
-                        .headlineMedium
-                        ?.copyWith(color: const Color(0xFF172033), fontSize: wide ? 30 : 25),
+                    style: Theme.of(context).textTheme.headlineMedium?.copyWith(
+                        color: const Color(0xFF172033),
+                        fontSize: wide ? 30 : 25),
                   ),
                   const SizedBox(height: 6),
-                  const Text('Real-time insights into revenue, conversion rates, client performance, and cash flow.'),
+                  const Text(
+                      'Real-time insights into revenue, conversion rates, client performance, and cash flow.'),
                   const SizedBox(height: 20),
-              // Top Metrics Cards
-              LayoutBuilder(
-                builder: (context, constraints) {
-                  final cols = constraints.maxWidth > 800 ? 4 : constraints.maxWidth > 520 ? 2 : 1;
-                  return GridView.count(
-                    crossAxisCount: cols,
-                    shrinkWrap: true,
-                    physics: const NeverScrollableScrollPhysics(),
-                    crossAxisSpacing: 14,
-                    mainAxisSpacing: 14,
-                    childAspectRatio: cols == 1 ? 3.0 : cols == 2 ? 1.9 : 1.5,
+                  // Top Metrics Cards
+                  LayoutBuilder(
+                    builder: (context, constraints) {
+                      final cols = constraints.maxWidth > 800
+                          ? 4
+                          : constraints.maxWidth > 520
+                              ? 2
+                              : 1;
+                      return GridView.count(
+                        crossAxisCount: cols,
+                        shrinkWrap: true,
+                        physics: const NeverScrollableScrollPhysics(),
+                        crossAxisSpacing: 14,
+                        mainAxisSpacing: 14,
+                        childAspectRatio: cols == 1
+                            ? 3.0
+                            : cols == 2
+                                ? 1.9
+                                : 1.5,
+                        children: [
+                          _AnalyticsCard(
+                            title: 'Total Revenue Billed',
+                            value: CurrencyHelper.format(
+                                _totalInvoiced, currencyCode),
+                            icon: Icons.trending_up_rounded,
+                            color: const Color(0xFF4F46E5),
+                            caption:
+                                '${documents.where((d) => d.kind == DocumentKind.invoice && d.status != 'Void' && d.status != 'Draft' && d.currencyCode.toUpperCase() == currencyCode.toUpperCase()).length} Invoices',
+                          ),
+                          _AnalyticsCard(
+                            title: 'Total Cash Collected',
+                            value: CurrencyHelper.format(
+                                _totalCollected, currencyCode),
+                            icon: Icons.check_circle_outline_rounded,
+                            color: const Color(0xFF0E9F6E),
+                            caption: '${payments.length} Payments Received',
+                          ),
+                          _AnalyticsCard(
+                            title: 'Outstanding Balance',
+                            value: CurrencyHelper.format(
+                                _totalOutstanding, currencyCode),
+                            icon: Icons.account_balance_wallet_outlined,
+                            color: const Color(0xFFB54708),
+                            caption:
+                                'Unpaid Receivables ($_overdueCount Overdue)',
+                          ),
+                          _AnalyticsCard(
+                            title: 'Quote Conversion',
+                            value: '${_conversionRate.toStringAsFixed(1)}%',
+                            icon: Icons.pie_chart_outline_rounded,
+                            color: const Color(0xFF7E22CE),
+                            caption:
+                                '$_acceptedQuotes of $_totalQuotes Quotes Accepted',
+                          ),
+                        ],
+                      );
+                    },
+                  ),
+                  const SizedBox(height: 24),
+                  // Conversion & Overdue Stats Row
+                  Row(
                     children: [
-                      _AnalyticsCard(
-                        title: 'Total Revenue Billed',
-                        value: CurrencyHelper.format(_totalInvoiced, currencyCode),
-                        icon: Icons.trending_up_rounded,
-                        color: const Color(0xFF4F46E5),
-                        caption: '${documents.where((d) => d.kind == DocumentKind.invoice && d.status != 'Void' && d.status != 'Draft' && d.currencyCode.toUpperCase() == currencyCode.toUpperCase()).length} Invoices',
-                      ),
-                      _AnalyticsCard(
-                        title: 'Total Cash Collected',
-                        value: CurrencyHelper.format(_totalCollected, currencyCode),
-                        icon: Icons.check_circle_outline_rounded,
-                        color: const Color(0xFF0E9F6E),
-                        caption: '${payments.length} Payments Received',
-                      ),
-                      _AnalyticsCard(
-                        title: 'Outstanding Balance',
-                        value: CurrencyHelper.format(_totalOutstanding, currencyCode),
-                        icon: Icons.account_balance_wallet_outlined,
-                        color: const Color(0xFFB54708),
-                        caption: 'Unpaid Receivables ($_overdueCount Overdue)',
-                      ),
-                      _AnalyticsCard(
-                        title: 'Quote Conversion',
-                        value: '${_conversionRate.toStringAsFixed(1)}%',
-                        icon: Icons.pie_chart_outline_rounded,
-                        color: const Color(0xFF7E22CE),
-                        caption: '$_acceptedQuotes of $_totalQuotes Quotes Accepted',
-                      ),
-                    ],
-                  );
-                },
-              ),
-              const SizedBox(height: 24),
-              // Conversion & Overdue Stats Row
-              Row(
-                children: [
-                  Expanded(
-                    child: Card(
-                      child: Padding(
-                        padding: const EdgeInsets.all(20),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            const Text(
-                              'Quotation Conversion Funnel',
-                              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
-                            ),
-                            const SizedBox(height: 12),
-                            LinearProgressIndicator(
-                              value: _totalQuotes > 0 ? _acceptedQuotes / _totalQuotes : 0.0,
-                              minHeight: 10,
-                              borderRadius: BorderRadius.circular(5),
-                              backgroundColor: const Color(0xFFE9ECF3),
-                              color: const Color(0xFF4F46E5),
-                            ),
-                            const SizedBox(height: 12),
-                            Row(
-                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      Expanded(
+                        child: Card(
+                          child: Padding(
+                            padding: const EdgeInsets.all(20),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                Text('Total Quotes: $_totalQuotes'),
-                                Text('Accepted: $_acceptedQuotes'),
-                                Text(
-                                  'Conversion: ${_conversionRate.toStringAsFixed(1)}%',
-                                  style: const TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF4F46E5)),
+                                const Text(
+                                  'Quotation Conversion Funnel',
+                                  style: TextStyle(
+                                      fontWeight: FontWeight.bold,
+                                      fontSize: 16),
+                                ),
+                                const SizedBox(height: 12),
+                                LinearProgressIndicator(
+                                  value: _totalQuotes > 0
+                                      ? _acceptedQuotes / _totalQuotes
+                                      : 0.0,
+                                  minHeight: 10,
+                                  borderRadius: BorderRadius.circular(5),
+                                  backgroundColor: const Color(0xFFE9ECF3),
+                                  color: const Color(0xFF4F46E5),
+                                ),
+                                const SizedBox(height: 12),
+                                Row(
+                                  mainAxisAlignment:
+                                      MainAxisAlignment.spaceBetween,
+                                  children: [
+                                    Text('Total Quotes: $_totalQuotes'),
+                                    Text('Accepted: $_acceptedQuotes'),
+                                    Text(
+                                      'Conversion: ${_conversionRate.toStringAsFixed(1)}%',
+                                      style: const TextStyle(
+                                          fontWeight: FontWeight.bold,
+                                          color: Color(0xFF4F46E5)),
+                                    ),
+                                  ],
                                 ),
                               ],
                             ),
-                          ],
+                          ),
                         ),
                       ),
-                    ),
+                    ],
+                  ),
+                  const SizedBox(height: 24),
+                  LayoutBuilder(
+                    builder: (context, constraints) {
+                      final isWide = constraints.maxWidth > 750;
+                      return isWide
+                          ? Row(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Expanded(
+                                    child: _buildTopClientsCard(
+                                        context, topClients,
+                                        isPro: isPro)),
+                                const SizedBox(width: 16),
+                                Expanded(
+                                    child: _buildPaymentMethodsCard(
+                                        context, paymentMethods,
+                                        isPro: isPro)),
+                              ],
+                            )
+                          : Column(
+                              children: [
+                                _buildTopClientsCard(context, topClients,
+                                    isPro: isPro),
+                                const SizedBox(height: 16),
+                                _buildPaymentMethodsCard(
+                                    context, paymentMethods,
+                                    isPro: isPro),
+                              ],
+                            );
+                    },
                   ),
                 ],
               ),
-              const SizedBox(height: 24),
-              LayoutBuilder(
-                builder: (context, constraints) {
-                  final isWide = constraints.maxWidth > 750;
-                  return isWide
-                      ? Row(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Expanded(child: _buildTopClientsCard(context, topClients, isPro: isPro)),
-                            const SizedBox(width: 16),
-                            Expanded(child: _buildPaymentMethodsCard(context, paymentMethods, isPro: isPro)),
-                          ],
-                        )
-                      : Column(
-                          children: [
-                            _buildTopClientsCard(context, topClients, isPro: isPro),
-                            const SizedBox(height: 16),
-                            _buildPaymentMethodsCard(context, paymentMethods, isPro: isPro),
-                          ],
-                        );
-                },
-              ),
-            ],
+            ),
           ),
-        ),
-      ),
+        );
+      },
     );
-  },
-);
   }
 
-  Widget _buildTopClientsCard(BuildContext context, List<MapEntry<String, double>> topClients, {required bool isPro}) {
+  Widget _buildTopClientsCard(
+      BuildContext context, List<MapEntry<String, double>> topClients,
+      {required bool isPro}) {
     final maxVal = topClients.isNotEmpty ? topClients.first.value : 1.0;
     return Card(
       child: Padding(
@@ -334,7 +386,8 @@ class AnalyticsScreen extends StatelessWidget {
                 ),
                 if (!isPro)
                   Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                     decoration: BoxDecoration(
                       color: const Color(0xFF6366F1).withValues(alpha: 0.1),
                       borderRadius: BorderRadius.circular(10),
@@ -342,9 +395,14 @@ class AnalyticsScreen extends StatelessWidget {
                     child: const Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        Icon(Icons.lock_outline_rounded, size: 12, color: Color(0xFF6366F1)),
+                        Icon(Icons.lock_outline_rounded,
+                            size: 12, color: Color(0xFF6366F1)),
                         SizedBox(width: 4),
-                        Text('PRO', style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Color(0xFF6366F1))),
+                        Text('PRO',
+                            style: TextStyle(
+                                fontSize: 10,
+                                fontWeight: FontWeight.bold,
+                                color: Color(0xFF6366F1))),
                       ],
                     ),
                   ),
@@ -371,8 +429,11 @@ class AnalyticsScreen extends StatelessWidget {
                             Row(
                               mainAxisAlignment: MainAxisAlignment.spaceBetween,
                               children: [
-                                Text(item.key, style: const TextStyle(fontWeight: FontWeight.bold)),
-                                Text(CurrencyHelper.format(item.value, currencyCode)),
+                                Text(item.key,
+                                    style: const TextStyle(
+                                        fontWeight: FontWeight.bold)),
+                                Text(CurrencyHelper.format(
+                                    item.value, currencyCode)),
                               ],
                             ),
                             const SizedBox(height: 4),
@@ -398,23 +459,27 @@ class AnalyticsScreen extends StatelessWidget {
                     ),
                     child: Column(
                       children: [
-                        const Icon(Icons.lock_rounded, color: Color(0xFF6366F1), size: 24),
+                        const Icon(Icons.lock_rounded,
+                            color: Color(0xFF6366F1), size: 24),
                         const SizedBox(height: 6),
                         const Text(
                           'Full client ranking is a Pro feature',
-                          style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+                          style: TextStyle(
+                              fontWeight: FontWeight.bold, fontSize: 13),
                         ),
                         const SizedBox(height: 4),
                         const Text(
                           'Subscribe with PayPal to see lifetime revenue, payment velocity, and repeat clients.',
                           textAlign: TextAlign.center,
-                          style: TextStyle(color: Color(0xFF64748B), fontSize: 11),
+                          style:
+                              TextStyle(color: Color(0xFF64748B), fontSize: 11),
                         ),
                         const SizedBox(height: 10),
                         FilledButton.tonal(
                           onPressed: () => PaywallScreen.showPaywall(
                             context,
-                            featurePrompt: 'Unlock Client Revenue Analytics with PayPal Subscription',
+                            featurePrompt:
+                                'Unlock Client Revenue Analytics with PayPal Subscription',
                           ),
                           child: const Text('Unlock Top Clients'),
                         ),
@@ -438,7 +503,9 @@ class AnalyticsScreen extends StatelessWidget {
                       Row(
                         mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
-                          Text(item.key, style: const TextStyle(fontWeight: FontWeight.bold)),
+                          Text(item.key,
+                              style:
+                                  const TextStyle(fontWeight: FontWeight.bold)),
                           Text(CurrencyHelper.format(item.value, currencyCode)),
                         ],
                       ),
@@ -460,7 +527,9 @@ class AnalyticsScreen extends StatelessWidget {
     );
   }
 
-  Widget _buildPaymentMethodsCard(BuildContext context, List<MapEntry<String, double>> paymentMethods, {required bool isPro}) {
+  Widget _buildPaymentMethodsCard(
+      BuildContext context, List<MapEntry<String, double>> paymentMethods,
+      {required bool isPro}) {
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(20),
@@ -476,7 +545,8 @@ class AnalyticsScreen extends StatelessWidget {
                 ),
                 if (!isPro)
                   Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                     decoration: BoxDecoration(
                       color: const Color(0xFF6366F1).withValues(alpha: 0.1),
                       borderRadius: BorderRadius.circular(10),
@@ -484,9 +554,14 @@ class AnalyticsScreen extends StatelessWidget {
                     child: const Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        Icon(Icons.lock_outline_rounded, size: 12, color: Color(0xFF6366F1)),
+                        Icon(Icons.lock_outline_rounded,
+                            size: 12, color: Color(0xFF6366F1)),
                         SizedBox(width: 4),
-                        Text('PRO', style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Color(0xFF6366F1))),
+                        Text('PRO',
+                            style: TextStyle(
+                                fontSize: 10,
+                                fontWeight: FontWeight.bold,
+                                color: Color(0xFF6366F1))),
                       ],
                     ),
                   ),
@@ -505,14 +580,18 @@ class AnalyticsScreen extends StatelessWidget {
                   ListTile(
                     contentPadding: EdgeInsets.zero,
                     leading: CircleAvatar(
-                      backgroundColor: const Color(0xFF0E9F6E).withValues(alpha: 0.1),
+                      backgroundColor:
+                          const Color(0xFF0E9F6E).withValues(alpha: 0.1),
                       foregroundColor: const Color(0xFF0E9F6E),
                       child: const Icon(Icons.payments_outlined, size: 20),
                     ),
-                    title: Text(paymentMethods.first.key, style: const TextStyle(fontWeight: FontWeight.bold)),
+                    title: Text(paymentMethods.first.key,
+                        style: const TextStyle(fontWeight: FontWeight.bold)),
                     trailing: Text(
-                      CurrencyHelper.format(paymentMethods.first.value, currencyCode),
-                      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
+                      CurrencyHelper.format(
+                          paymentMethods.first.value, currencyCode),
+                      style: const TextStyle(
+                          fontWeight: FontWeight.bold, fontSize: 15),
                     ),
                   ),
                   const SizedBox(height: 12),
@@ -525,23 +604,27 @@ class AnalyticsScreen extends StatelessWidget {
                     ),
                     child: Column(
                       children: [
-                        const Icon(Icons.pie_chart_outline_rounded, color: Color(0xFF6366F1), size: 24),
+                        const Icon(Icons.pie_chart_outline_rounded,
+                            color: Color(0xFF6366F1), size: 24),
                         const SizedBox(height: 6),
                         const Text(
                           'Payment distribution breakdown is locked',
-                          style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+                          style: TextStyle(
+                              fontWeight: FontWeight.bold, fontSize: 13),
                         ),
                         const SizedBox(height: 4),
                         const Text(
                           'Track cash vs bank transfer vs PayPal intake trends with Pro.',
                           textAlign: TextAlign.center,
-                          style: TextStyle(color: Color(0xFF64748B), fontSize: 11),
+                          style:
+                              TextStyle(color: Color(0xFF64748B), fontSize: 11),
                         ),
                         const SizedBox(height: 10),
                         FilledButton.tonal(
                           onPressed: () => PaywallScreen.showPaywall(
                             context,
-                            featurePrompt: 'Unlock Payment Method Distribution with PayPal Subscription',
+                            featurePrompt:
+                                'Unlock Payment Method Distribution with PayPal Subscription',
                           ),
                           child: const Text('Unlock Breakdown'),
                         ),
@@ -561,14 +644,17 @@ class AnalyticsScreen extends StatelessWidget {
                   return ListTile(
                     contentPadding: EdgeInsets.zero,
                     leading: CircleAvatar(
-                      backgroundColor: const Color(0xFF0E9F6E).withValues(alpha: 0.1),
+                      backgroundColor:
+                          const Color(0xFF0E9F6E).withValues(alpha: 0.1),
                       foregroundColor: const Color(0xFF0E9F6E),
                       child: const Icon(Icons.payments_outlined, size: 20),
                     ),
-                    title: Text(item.key, style: const TextStyle(fontWeight: FontWeight.bold)),
+                    title: Text(item.key,
+                        style: const TextStyle(fontWeight: FontWeight.bold)),
                     trailing: Text(
                       CurrencyHelper.format(item.value, currencyCode),
-                      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
+                      style: const TextStyle(
+                          fontWeight: FontWeight.bold, fontSize: 15),
                     ),
                   );
                 },
@@ -631,8 +717,12 @@ class _AnalyticsCard extends StatelessWidget {
                     ),
                   ),
                   const SizedBox(height: 3),
-                  Text(title, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700)),
-                  Text(caption, style: const TextStyle(fontSize: 10, color: Color(0xFF7B8497))),
+                  Text(title,
+                      style: const TextStyle(
+                          fontSize: 12, fontWeight: FontWeight.w700)),
+                  Text(caption,
+                      style: const TextStyle(
+                          fontSize: 10, color: Color(0xFF7B8497))),
                 ],
               ),
             ],

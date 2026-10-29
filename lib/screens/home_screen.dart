@@ -93,7 +93,8 @@ class _HomeScreenState extends State<HomeScreen> {
       if (!mounted) return;
       setState(() {
         _loading = false;
-        _loadError = 'Saved data could not be read. Your local data was not overwritten.';
+        _loadError =
+            'Saved data could not be read. Your local data was not overwritten.';
       });
     }
   }
@@ -106,7 +107,9 @@ class _HomeScreenState extends State<HomeScreen> {
     } catch (_) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Could not save to this device. Check available storage and try again.')),
+          const SnackBar(
+              content: Text(
+                  'Could not save to this device. Check available storage and try again.')),
         );
       }
       return false;
@@ -120,11 +123,13 @@ class _HomeScreenState extends State<HomeScreen> {
           : _section == 'Invoices'
               ? doc.kind == DocumentKind.invoice
               : _section == 'Follow-ups'
-                  ? doc.kind == DocumentKind.quote && !['Accepted', 'Declined'].contains(doc.status)
+                  ? doc.kind == DocumentKind.quote &&
+                      !['Accepted', 'Declined'].contains(doc.status)
                   : true;
-      final filterMatch = _filter == 'All' || doc.status == _filter;
+      final status = effectiveInvoiceStatus(doc, _payments);
+      final filterMatch = _filter == 'All' || status == _filter;
       final queryMatch = _query.isEmpty ||
-          [doc.number, doc.clientName, doc.clientEmail, doc.status]
+          [doc.number, doc.clientName, doc.clientEmail, status]
               .any((value) => value.toLowerCase().contains(_query));
       return sectionMatch && filterMatch && queryMatch;
     }).toList()
@@ -134,10 +139,14 @@ class _HomeScreenState extends State<HomeScreen> {
   double get _paidTotal => _payments.fold<double>(0, (sum, payment) {
         BusinessDocument? invoice;
         for (final d in _documents) {
-          if (d.id == payment.invoiceId && d.kind == DocumentKind.invoice) { invoice = d; break; }
+          if (d.id == payment.invoiceId && d.kind == DocumentKind.invoice) {
+            invoice = d;
+            break;
+          }
         }
         if (invoice == null ||
-            invoice.currencyCode.toUpperCase() != _profile.currencyCode.toUpperCase() ||
+            invoice.currencyCode.toUpperCase() !=
+                _profile.currencyCode.toUpperCase() ||
             !payment.amount.isFinite ||
             payment.amount <= 0) {
           return sum;
@@ -146,12 +155,15 @@ class _HomeScreenState extends State<HomeScreen> {
       });
 
   double get _outstandingTotal => _documents
-      .where((doc) =>
-          doc.kind == DocumentKind.invoice &&
-          doc.currencyCode.toUpperCase() == _profile.currencyCode.toUpperCase() &&
-          !['Draft', 'Void'].contains(doc.status))
-      .fold<double>(0, (sum, doc) {
-        final paid = _payments.where((p) => p.invoiceId == doc.id && p.amount.isFinite && p.amount > 0)
+          .where((doc) =>
+              doc.kind == DocumentKind.invoice &&
+              doc.currencyCode.toUpperCase() ==
+                  _profile.currencyCode.toUpperCase() &&
+              !['Draft', 'Void'].contains(doc.status))
+          .fold<double>(0, (sum, doc) {
+        final paid = _payments
+            .where((p) =>
+                p.invoiceId == doc.id && p.amount.isFinite && p.amount > 0)
             .fold<double>(0, (amount, p) => amount + p.amount);
         return sum + (doc.total - paid).clamp(0.0, doc.total).toDouble();
       });
@@ -159,21 +171,27 @@ class _HomeScreenState extends State<HomeScreen> {
   double get _quoteTotal => _documents
       .where((doc) =>
           doc.kind == DocumentKind.quote &&
-          doc.currencyCode.toUpperCase() == _profile.currencyCode.toUpperCase() &&
+          doc.currencyCode.toUpperCase() ==
+              _profile.currencyCode.toUpperCase() &&
           !['Accepted', 'Declined'].contains(doc.status))
       .fold(0, (sum, doc) => sum + doc.total);
 
-  Future<void> _createDocument(DocumentKind kind, {BusinessDocument? existing}) async {
+  Future<void> _createDocument(DocumentKind kind,
+      {BusinessDocument? existing}) async {
     if (_loadError != null) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Resolve the local data issue before creating or changing records.')),
+        const SnackBar(
+            content: Text(
+                'Resolve the local data issue before creating or changing records.')),
       );
       return;
     }
-    if (existing == null && !SubscriptionService.instance.canCreateDocument(_documents.length)) {
+    if (existing == null &&
+        !SubscriptionService.instance.canCreateDocument(_documents.length)) {
       final upgraded = await PaywallScreen.showPaywall(
         context,
-        featurePrompt: 'You have reached the Free Tier limit of 5 documents. Subscribe with PayPal to unlock unlimited quotes and invoices.',
+        featurePrompt:
+            'You have reached the Free Tier limit of 5 documents. Subscribe with PayPal to unlock unlimited quotes and invoices.',
       );
       if (!mounted) return;
       if (upgraded != true && !SubscriptionService.instance.isPro) {
@@ -186,6 +204,9 @@ class _HomeScreenState extends State<HomeScreen> {
       builder: (_) => DocumentEditorDialog(
         kind: kind,
         existing: existing,
+        currencyLocked: kind == DocumentKind.invoice &&
+            existing != null &&
+            _payments.any((payment) => payment.invoiceId == existing.id),
         nextNumber: _nextNumber(kind),
         customers: _customers,
         items: _items,
@@ -198,16 +219,8 @@ class _HomeScreenState extends State<HomeScreen> {
       ),
     );
     if (result == null || !mounted) return;
-    if (kind == DocumentKind.invoice && result.status != 'Void') {
-      final paid = _payments.where((p) => p.invoiceId == result.id && p.amount.isFinite && p.amount > 0)
-          .fold<double>(0, (sum, p) => sum + p.amount);
-      if (paid > 0 && paid + 0.004 >= result.total) {
-        result.status = 'Paid';
-      } else if (paid > 0) {
-        result.status = 'Pending';
-      } else if (result.status == 'Paid' || result.status == 'Pending') {
-        result.status = result.dueDate.isBefore(DateTime.now()) ? 'Overdue' : 'Sent';
-      }
+    if (kind == DocumentKind.invoice) {
+      result.status = effectiveInvoiceStatus(result, _payments);
     }
     final previousDocuments = List<BusinessDocument>.from(_documents);
     setState(() {
@@ -227,16 +240,21 @@ class _HomeScreenState extends State<HomeScreen> {
     }
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('${kind == DocumentKind.invoice ? 'Invoice' : 'Quote'} saved on this device.')),
+        SnackBar(
+            content: Text(
+                '${kind == DocumentKind.invoice ? 'Invoice' : 'Quote'} saved on this device.')),
       );
     }
   }
 
   String _nextNumber(DocumentKind kind) {
-    final prefix = kind == DocumentKind.invoice ? _profile.invoicePrefix : _profile.quotePrefix;
+    final prefix = kind == DocumentKind.invoice
+        ? _profile.invoicePrefix
+        : _profile.quotePrefix;
     final stem = '$prefix${DateTime.now().year}-';
     var highest = 0;
-    for (final doc in _documents.where((d) => d.kind == kind && d.number.startsWith(stem))) {
+    for (final doc in _documents
+        .where((d) => d.kind == kind && d.number.startsWith(stem))) {
       final sequence = int.tryParse(doc.number.substring(stem.length));
       if (sequence != null && sequence > highest) highest = sequence;
     }
@@ -253,17 +271,24 @@ class _HomeScreenState extends State<HomeScreen> {
     // Find matching customer details
     Customer? matchedCustomer;
     if (doc.customerId.isNotEmpty) {
-      matchedCustomer = _customers.firstWhere((c) => c.id == doc.customerId, orElse: () => Customer(id: '', name: ''));
+      matchedCustomer = _customers.firstWhere((c) => c.id == doc.customerId,
+          orElse: () => Customer(id: '', name: ''));
     }
     if (matchedCustomer == null || matchedCustomer.name.isEmpty) {
       matchedCustomer = _customers.firstWhere(
         (c) => c.name.toLowerCase() == doc.clientName.toLowerCase(),
-        orElse: () => Customer(id: '', name: doc.clientName, email: doc.clientEmail),
+        orElse: () =>
+            Customer(id: '', name: doc.clientName, email: doc.clientEmail),
       );
     }
 
-    final custName = doc.clientName.isNotEmpty ? doc.clientName : (matchedCustomer.name.isNotEmpty ? matchedCustomer.name : 'Valued Client');
-    final custEmail = doc.clientEmail.isNotEmpty ? doc.clientEmail : matchedCustomer.email;
+    final custName = doc.clientName.isNotEmpty
+        ? doc.clientName
+        : (matchedCustomer.name.isNotEmpty
+            ? matchedCustomer.name
+            : 'Valued Client');
+    final custEmail =
+        doc.clientEmail.isNotEmpty ? doc.clientEmail : matchedCustomer.email;
     final custPhone = matchedCustomer.phone;
     final custAddress = matchedCustomer.billingAddress;
 
@@ -304,11 +329,20 @@ class _HomeScreenState extends State<HomeScreen> {
                   doc.kind == DocumentKind.invoice
                       ? AppTranslations.get('invoice', _lang)
                       : AppTranslations.get('quotation', _lang),
-                  style: pw.TextStyle(fontSize: 24, fontWeight: pw.FontWeight.bold, color: navyColor),
+                  style: pw.TextStyle(
+                      fontSize: 24,
+                      fontWeight: pw.FontWeight.bold,
+                      color: navyColor),
                 ),
                 pw.SizedBox(height: 2),
-                pw.Text('Document #: ${doc.number}', style: const pw.TextStyle(fontSize: 11, fontWeight: pw.FontWeight.bold, color: PdfColors.grey800)),
-                pw.Text('Date: ${dateLabel(doc.issueDate)}', style: const pw.TextStyle(fontSize: 10, color: PdfColors.grey700)),
+                pw.Text('Document #: ${doc.number}',
+                    style: const pw.TextStyle(
+                        fontSize: 11,
+                        fontWeight: pw.FontWeight.bold,
+                        color: PdfColors.grey800)),
+                pw.Text('Date: ${dateLabel(doc.issueDate)}',
+                    style: const pw.TextStyle(
+                        fontSize: 10, color: PdfColors.grey700)),
               ],
             ),
           ],
@@ -326,15 +360,29 @@ class _HomeScreenState extends State<HomeScreen> {
               child: pw.Column(
                 crossAxisAlignment: pw.CrossAxisAlignment.start,
                 children: [
-                  pw.Text('Billing Information:', style: pw.TextStyle(fontSize: 13, fontWeight: pw.FontWeight.bold, color: navyColor)),
+                  pw.Text('Billing Information:',
+                      style: pw.TextStyle(
+                          fontSize: 13,
+                          fontWeight: pw.FontWeight.bold,
+                          color: navyColor)),
                   pw.SizedBox(height: 6),
-                  _kvRow('Company Name:', _profile.businessName.isNotEmpty ? _profile.businessName : 'My Company'),
-                  if (_profile.ownerName.isNotEmpty) _kvRow('Owner / Contact:', _profile.ownerName),
-                  if (_profile.address.isNotEmpty) _kvRow('Company Address:', _profile.address),
-                  if (_profile.phone.isNotEmpty) _kvRow('Phone Number:', _profile.phone),
-                  if (_profile.email.isNotEmpty) _kvRow('Email:', _profile.email),
-                  if (_profile.taxNumber.isNotEmpty) _kvRow('VAT / Tax No:', _profile.taxNumber),
-                  if (_profile.website.isNotEmpty) _kvRow('Website:', _profile.website),
+                  _kvRow(
+                      'Company Name:',
+                      _profile.businessName.isNotEmpty
+                          ? _profile.businessName
+                          : 'My Company'),
+                  if (_profile.ownerName.isNotEmpty)
+                    _kvRow('Owner / Contact:', _profile.ownerName),
+                  if (_profile.address.isNotEmpty)
+                    _kvRow('Company Address:', _profile.address),
+                  if (_profile.phone.isNotEmpty)
+                    _kvRow('Phone Number:', _profile.phone),
+                  if (_profile.email.isNotEmpty)
+                    _kvRow('Email:', _profile.email),
+                  if (_profile.taxNumber.isNotEmpty)
+                    _kvRow('VAT / Tax No:', _profile.taxNumber),
+                  if (_profile.website.isNotEmpty)
+                    _kvRow('Website:', _profile.website),
                 ],
               ),
             ),
@@ -344,10 +392,15 @@ class _HomeScreenState extends State<HomeScreen> {
               child: pw.Column(
                 crossAxisAlignment: pw.CrossAxisAlignment.start,
                 children: [
-                  pw.Text('Bill To:', style: pw.TextStyle(fontSize: 13, fontWeight: pw.FontWeight.bold, color: navyColor)),
+                  pw.Text('Bill To:',
+                      style: pw.TextStyle(
+                          fontSize: 13,
+                          fontWeight: pw.FontWeight.bold,
+                          color: navyColor)),
                   pw.SizedBox(height: 6),
                   _kvRow('Customer Name:', custName),
-                  if (custAddress.isNotEmpty) _kvRow('Billing Address:', custAddress),
+                  if (custAddress.isNotEmpty)
+                    _kvRow('Billing Address:', custAddress),
                   if (custPhone.isNotEmpty) _kvRow('Phone:', custPhone),
                   if (custEmail.isNotEmpty) _kvRow('Email:', custEmail),
                 ],
@@ -358,7 +411,11 @@ class _HomeScreenState extends State<HomeScreen> {
         pw.SizedBox(height: 20),
 
         // Service Details Section
-        pw.Text('Service Details:', style: pw.TextStyle(fontSize: 13, fontWeight: pw.FontWeight.bold, color: navyColor)),
+        pw.Text('Service Details:',
+            style: pw.TextStyle(
+                fontSize: 13,
+                fontWeight: pw.FontWeight.bold,
+                color: navyColor)),
         pw.SizedBox(height: 8),
 
         // Line Items Table
@@ -393,11 +450,16 @@ class _HomeScreenState extends State<HomeScreen> {
                   _tableCell('$idx', bold: true),
                   _tableCell(line.description),
                   _tableCell(
-                    line.quantity.toStringAsFixed(line.quantity.truncateToDouble() == line.quantity ? 0 : 2),
+                    line.quantity.toStringAsFixed(
+                        line.quantity.truncateToDouble() == line.quantity
+                            ? 0
+                            : 2),
                     alignRight: true,
                   ),
-                  _tableCell(CurrencyHelper.format(line.unitPrice, currency), alignRight: true),
-                  _tableCell(CurrencyHelper.format(line.amount, currency), alignRight: true, bold: true),
+                  _tableCell(CurrencyHelper.format(line.unitPrice, currency),
+                      alignRight: true),
+                  _tableCell(CurrencyHelper.format(line.amount, currency),
+                      alignRight: true, bold: true),
                 ],
               );
             }),
@@ -415,15 +477,24 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
           child: pw.Column(
             children: [
-              _navyTotalRow('Subtotal', CurrencyHelper.format(doc.subtotal, currency)),
+              _navyTotalRow(
+                  'Subtotal', CurrencyHelper.format(doc.subtotal, currency)),
               if (doc.discount > 0)
-                _navyTotalRow('Discount', '-${CurrencyHelper.format(doc.discount, currency)}'),
-              _navyTotalRow('Sales Tax (${doc.taxPercent.toStringAsFixed(1)}%)', CurrencyHelper.format(doc.taxAmount, currency)),
+                _navyTotalRow('Discount',
+                    '-${CurrencyHelper.format(doc.discount, currency)}'),
+              _navyTotalRow('Sales Tax (${doc.taxPercent.toStringAsFixed(1)}%)',
+                  CurrencyHelper.format(doc.taxAmount, currency)),
               pw.Divider(color: PdfColors.grey600, height: 10),
-              _navyTotalRow('Total Amount Due', CurrencyHelper.format(doc.total, currency), isLarge: true),
-              if (doc.kind == DocumentKind.invoice && docPayments.isNotEmpty) ...[
-                _navyTotalRow('Total Paid', '-${CurrencyHelper.format(totalPaid, currency)}'),
-                _navyTotalRow('Remaining Balance', CurrencyHelper.format(remaining, currency), isLarge: true),
+              _navyTotalRow('Total Amount Due',
+                  CurrencyHelper.format(doc.total, currency),
+                  isLarge: true),
+              if (doc.kind == DocumentKind.invoice &&
+                  docPayments.isNotEmpty) ...[
+                _navyTotalRow('Total Paid',
+                    '-${CurrencyHelper.format(totalPaid, currency)}'),
+                _navyTotalRow('Remaining Balance',
+                    CurrencyHelper.format(remaining, currency),
+                    isLarge: true),
               ],
             ],
           ),
@@ -439,9 +510,17 @@ class _HomeScreenState extends State<HomeScreen> {
               child: pw.Column(
                 crossAxisAlignment: pw.CrossAxisAlignment.start,
                 children: [
-                  pw.Text('Billing Information:', style: pw.TextStyle(fontSize: 13, fontWeight: pw.FontWeight.bold, color: navyColor)),
+                  pw.Text('Billing Information:',
+                      style: pw.TextStyle(
+                          fontSize: 13,
+                          fontWeight: pw.FontWeight.bold,
+                          color: navyColor)),
                   pw.SizedBox(height: 6),
-                  _kvRow('Payment Method:', docPayments.isNotEmpty ? docPayments.last.method : 'Bank Transfer / EFT'),
+                  _kvRow(
+                      'Payment Method:',
+                      docPayments.isNotEmpty
+                          ? docPayments.last.method
+                          : 'Bank Transfer / EFT'),
                   _kvRow('Due Date:', dateLabel(doc.dueDate)),
                   if (_profile.bankDetails.isNotEmpty)
                     _kvRow('Bank Account:', _profile.bankDetails),
@@ -454,19 +533,34 @@ class _HomeScreenState extends State<HomeScreen> {
               child: pw.Column(
                 crossAxisAlignment: pw.CrossAxisAlignment.start,
                 children: [
-                  pw.Text('Terms and Conditions:', style: pw.TextStyle(fontSize: 13, fontWeight: pw.FontWeight.bold, color: navyColor)),
+                  pw.Text('Terms and Conditions:',
+                      style: pw.TextStyle(
+                          fontSize: 13,
+                          fontWeight: pw.FontWeight.bold,
+                          color: navyColor)),
                   pw.SizedBox(height: 6),
                   if (_profile.paymentTerms.isNotEmpty)
-                    pw.Text(_profile.paymentTerms, style: const pw.TextStyle(fontSize: 9, color: PdfColors.grey800))
+                    pw.Text(_profile.paymentTerms,
+                        style: const pw.TextStyle(
+                            fontSize: 9, color: PdfColors.grey800))
                   else ...[
-                    pw.Text('• Payment is due upon receipt of this invoice.', style: const pw.TextStyle(fontSize: 9, color: PdfColors.grey800)),
-                    pw.Text('• Late payments may incur additional charges.', style: const pw.TextStyle(fontSize: 9, color: PdfColors.grey800)),
+                    pw.Text('• Payment is due upon receipt of this invoice.',
+                        style: const pw.TextStyle(
+                            fontSize: 9, color: PdfColors.grey800)),
+                    pw.Text('• Late payments may incur additional charges.',
+                        style: const pw.TextStyle(
+                            fontSize: 9, color: PdfColors.grey800)),
                     if (_profile.businessName.isNotEmpty)
-                      pw.Text('• Please make payments to ${_profile.businessName}.', style: const pw.TextStyle(fontSize: 9, color: PdfColors.grey800)),
+                      pw.Text(
+                          '• Please make payments to ${_profile.businessName}.',
+                          style: const pw.TextStyle(
+                              fontSize: 9, color: PdfColors.grey800)),
                   ],
                   if (doc.notes.trim().isNotEmpty) ...[
                     pw.SizedBox(height: 6),
-                    pw.Text('Notes: ${doc.notes}', style: const pw.TextStyle(fontSize: 9, color: PdfColors.grey800)),
+                    pw.Text('Notes: ${doc.notes}',
+                        style: const pw.TextStyle(
+                            fontSize: 9, color: PdfColors.grey800)),
                   ],
                 ],
               ),
@@ -482,7 +576,8 @@ class _HomeScreenState extends State<HomeScreen> {
           children: [
             // Bottom Left Navy Contact Bar
             pw.Container(
-              padding: const pw.EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+              padding:
+                  const pw.EdgeInsets.symmetric(horizontal: 14, vertical: 8),
               decoration: pw.BoxDecoration(
                 color: navyColor,
                 borderRadius: const pw.BorderRadius.all(pw.Radius.circular(4)),
@@ -490,11 +585,19 @@ class _HomeScreenState extends State<HomeScreen> {
               child: pw.Row(
                 children: [
                   if (_profile.phone.isNotEmpty) ...[
-                    pw.Text(_profile.phone, style: const pw.TextStyle(color: PdfColors.white, fontSize: 9, fontWeight: pw.FontWeight.bold)),
+                    pw.Text(_profile.phone,
+                        style: const pw.TextStyle(
+                            color: PdfColors.white,
+                            fontSize: 9,
+                            fontWeight: pw.FontWeight.bold)),
                     pw.SizedBox(width: 14),
                   ],
                   if (_profile.email.isNotEmpty)
-                    pw.Text(_profile.email, style: const pw.TextStyle(color: PdfColors.white, fontSize: 9, fontWeight: pw.FontWeight.bold)),
+                    pw.Text(_profile.email,
+                        style: const pw.TextStyle(
+                            color: PdfColors.white,
+                            fontSize: 9,
+                            fontWeight: pw.FontWeight.bold)),
                 ],
               ),
             ),
@@ -502,19 +605,27 @@ class _HomeScreenState extends State<HomeScreen> {
             pw.Column(
               crossAxisAlignment: pw.CrossAxisAlignment.center,
               children: [
-                pw.Text('Date : ${dateLabel(DateTime.now())}', style: const pw.TextStyle(fontSize: 10, color: PdfColors.grey800)),
+                pw.Text('Date : ${dateLabel(DateTime.now())}',
+                    style: const pw.TextStyle(
+                        fontSize: 10, color: PdfColors.grey800)),
                 pw.SizedBox(height: 24),
                 pw.Container(
                   width: 140,
                   decoration: const pw.BoxDecoration(
-                    border: pw.Border(top: pw.BorderSide(color: PdfColors.grey800, width: 1)),
+                    border: pw.Border(
+                        top: pw.BorderSide(color: PdfColors.grey800, width: 1)),
                   ),
                   child: pw.Padding(
                     padding: const pw.EdgeInsets.only(top: 4),
                     child: pw.Text(
-                      _profile.businessName.isNotEmpty ? _profile.businessName : 'Authorized Signature',
+                      _profile.businessName.isNotEmpty
+                          ? _profile.businessName
+                          : 'Authorized Signature',
                       textAlign: pw.TextAlign.center,
-                      style: pw.TextStyle(fontSize: 10, fontWeight: pw.FontWeight.bold, color: navyColor),
+                      style: pw.TextStyle(
+                          fontSize: 10,
+                          fontWeight: pw.FontWeight.bold,
+                          color: navyColor),
                     ),
                   ),
                 ),
@@ -528,7 +639,8 @@ class _HomeScreenState extends State<HomeScreen> {
             alignment: pw.Alignment.center,
             padding: const pw.EdgeInsets.symmetric(vertical: 4),
             decoration: const pw.BoxDecoration(
-              border: pw.Border(top: pw.BorderSide(color: PdfColors.grey300, width: 0.5)),
+              border: pw.Border(
+                  top: pw.BorderSide(color: PdfColors.grey300, width: 0.5)),
             ),
             child: pw.Text(
               'Generated with Ledgerly Free • Upgrade to Pro to remove this watermark',
@@ -554,7 +666,10 @@ class _HomeScreenState extends State<HomeScreen> {
           children: [
             pw.TextSpan(
               text: '$label ',
-              style: const pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 9, color: PdfColors.grey900),
+              style: const pw.TextStyle(
+                  fontWeight: pw.FontWeight.bold,
+                  fontSize: 9,
+                  color: PdfColors.grey900),
             ),
             pw.TextSpan(
               text: value,
@@ -572,12 +687,16 @@ class _HomeScreenState extends State<HomeScreen> {
       child: pw.Text(
         text,
         textAlign: alignRight ? pw.TextAlign.right : pw.TextAlign.left,
-        style: const pw.TextStyle(color: PdfColors.white, fontWeight: pw.FontWeight.bold, fontSize: 9),
+        style: const pw.TextStyle(
+            color: PdfColors.white,
+            fontWeight: pw.FontWeight.bold,
+            fontSize: 9),
       ),
     );
   }
 
-  pw.Widget _tableCell(String text, {bool alignRight = false, bool bold = false}) {
+  pw.Widget _tableCell(String text,
+      {bool alignRight = false, bool bold = false}) {
     return pw.Padding(
       padding: const pw.EdgeInsets.symmetric(horizontal: 6, vertical: 6),
       child: pw.Text(
@@ -625,12 +744,14 @@ class _HomeScreenState extends State<HomeScreen> {
       if (share) {
         await Printing.sharePdf(bytes: bytes, filename: '${doc.number}.pdf');
       } else {
-        await Printing.layoutPdf(onLayout: (_) async => bytes, name: '${doc.number}.pdf');
+        await Printing.layoutPdf(
+            onLayout: (_) async => bytes, name: '${doc.number}.pdf');
       }
     } catch (_) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('PDF could not be prepared. Please try again.')),
+          const SnackBar(
+              content: Text('PDF could not be prepared. Please try again.')),
         );
       }
     }
@@ -642,21 +763,30 @@ class _HomeScreenState extends State<HomeScreen> {
       await Printing.sharePdf(
         bytes: bytes,
         filename: '${doc.number}.pdf',
-        subject: '${doc.kind == DocumentKind.invoice ? 'Invoice' : 'Quotation'} ${doc.number}',
-        body: 'Hi ${doc.clientName}, please find attached your ${doc.kind == DocumentKind.invoice ? 'invoice' : 'quotation'} ${doc.number} for ${CurrencyHelper.format(doc.total, doc.currencyCode)}. Thank you!',
+        subject:
+            '${doc.kind == DocumentKind.invoice ? 'Invoice' : 'Quotation'} ${doc.number}',
+        body:
+            'Hi ${doc.clientName}, please find attached your ${doc.kind == DocumentKind.invoice ? 'invoice' : 'quotation'} ${doc.number} for ${CurrencyHelper.format(doc.total, doc.currencyCode)}. Thank you!',
       );
     } catch (_) {
       try {
         final bytes = await _makePdf(doc);
         await Share.shareXFiles(
-          [XFile.fromData(bytes, mimeType: 'application/pdf', name: '${doc.number}.pdf')],
-          subject: '${doc.kind == DocumentKind.invoice ? 'Invoice' : 'Quotation'} ${doc.number}',
-          text: 'Hi ${doc.clientName}, here is your ${doc.kind == DocumentKind.invoice ? 'invoice' : 'quotation'} ${doc.number} for ${CurrencyHelper.format(doc.total, doc.currencyCode)}.',
+          [
+            XFile.fromData(bytes,
+                mimeType: 'application/pdf', name: '${doc.number}.pdf')
+          ],
+          subject:
+              '${doc.kind == DocumentKind.invoice ? 'Invoice' : 'Quotation'} ${doc.number}',
+          text:
+              'Hi ${doc.clientName}, here is your ${doc.kind == DocumentKind.invoice ? 'invoice' : 'quotation'} ${doc.number} for ${CurrencyHelper.format(doc.total, doc.currencyCode)}.',
         );
       } catch (_) {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Document could not be shared. Please try again.')),
+            const SnackBar(
+                content:
+                    Text('Document could not be shared. Please try again.')),
           );
         }
       }
@@ -668,13 +798,17 @@ class _HomeScreenState extends State<HomeScreen> {
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('Delete document?'),
-        content: Text(doc.kind == DocumentKind.invoice && _payments.any((p) => p.invoiceId == doc.id)
+        content: Text(doc.kind == DocumentKind.invoice &&
+                _payments.any((p) => p.invoiceId == doc.id)
             ? 'Delete ${doc.number} for ${doc.clientName} and its linked payment records? This cannot be undone on this device.'
             : 'Delete ${doc.number} for ${doc.clientName}? This cannot be undone on this device.'),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
+          TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Cancel')),
           FilledButton(
-            style: FilledButton.styleFrom(backgroundColor: const Color(0xFFB42318)),
+            style: FilledButton.styleFrom(
+                backgroundColor: const Color(0xFFB42318)),
             onPressed: () => Navigator.pop(context, true),
             child: const Text('Delete'),
           ),
@@ -691,22 +825,22 @@ class _HomeScreenState extends State<HomeScreen> {
       }
     });
     try {
-      await _store.save(_documents);
-      await _store.savePayments(_payments);
+      await _store.saveDocumentsAndPayments(_documents, _payments);
     } catch (_) {
       setState(() {
         _documents = previousDocuments;
         _payments = previousPayments;
       });
       try {
-        await _store.save(_documents);
-        await _store.savePayments(_payments);
+        await _store.saveDocumentsAndPayments(_documents, _payments);
       } catch (_) {
         // Best-effort rollback; the failure notification below is intentional.
       }
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('The document deletion could not be saved. Your previous records were restored where possible.')),
+          const SnackBar(
+              content: Text(
+                  'The document deletion could not be saved. Your previous records were restored where possible.')),
         );
       }
     }
@@ -758,7 +892,13 @@ class _HomeScreenState extends State<HomeScreen> {
                 _ => 0,
               },
               onDestinationSelected: (index) => setState(() {
-                _section = ['Overview', 'Invoices', 'Quotes', 'Analytics', 'Settings'][index];
+                _section = [
+                  'Overview',
+                  'Invoices',
+                  'Quotes',
+                  'Analytics',
+                  'Settings'
+                ][index];
                 _filter = 'All';
               }),
               destinations: [
@@ -797,9 +937,14 @@ class _HomeScreenState extends State<HomeScreen> {
             mainAxisSize: MainAxisSize.min,
             children: [
               ListTile(
-                leading: const Icon(Icons.workspace_premium_rounded, color: Color(0xFFF59E0B)),
-                title: const Text('Ledgerly Pro (PayPal Subscription)', style: TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF4F46E5))),
-                subtitle: Text(SubscriptionService.instance.isPro ? 'Pro Active' : 'Upgrade for unlimited invoices & clean PDFs'),
+                leading: const Icon(Icons.workspace_premium_rounded,
+                    color: Color(0xFFF59E0B)),
+                title: const Text('Ledgerly Pro (PayPal Subscription)',
+                    style: TextStyle(
+                        fontWeight: FontWeight.bold, color: Color(0xFF4F46E5))),
+                subtitle: Text(SubscriptionService.instance.isPro
+                    ? 'Pro Active'
+                    : 'Upgrade for unlimited invoices & clean PDFs'),
                 onTap: () {
                   Navigator.pop(context);
                   PaywallScreen.showPaywall(context);
@@ -816,15 +961,14 @@ class _HomeScreenState extends State<HomeScreen> {
                 'Payments',
                 'Analytics',
                 'Settings'
-              ]
-                  .map((label) => ListTile(
-                        leading: Icon(_iconFor(label)),
-                        title: Text(label),
-                        onTap: () {
-                          Navigator.pop(context);
-                          setState(() => _section = label);
-                        },
-                      )),
+              ].map((label) => ListTile(
+                    leading: Icon(_iconFor(label)),
+                    title: Text(label),
+                    onTap: () {
+                      Navigator.pop(context);
+                      setState(() => _section = label);
+                    },
+                  )),
             ],
           ),
         ),
@@ -857,11 +1001,14 @@ class _HomeScreenState extends State<HomeScreen> {
               children: [
                 const Icon(Icons.folder_open_outlined, size: 42, color: _brand),
                 const SizedBox(height: 12),
-                const Text('Local data needs attention', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+                const Text('Local data needs attention',
+                    style:
+                        TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
                 const SizedBox(height: 8),
                 Text(_loadError!, textAlign: TextAlign.center),
                 const SizedBox(height: 18),
-                OutlinedButton(onPressed: _loadAllData, child: const Text('Try again')),
+                OutlinedButton(
+                    onPressed: _loadAllData, child: const Text('Try again')),
               ],
             ),
           ),
@@ -887,12 +1034,14 @@ class _HomeScreenState extends State<HomeScreen> {
       return CustomersScreen(
         documents: _documents,
         customers: _customers,
+        currencyCode: _profile.currencyCode,
         onCustomersUpdated: (c) => setState(() => _customers = c),
       );
     }
     if (_section == 'Items') {
       return ItemsScreen(
         items: _items,
+        currencyCode: _profile.currencyCode,
         onItemsUpdated: (i) => setState(() => _items = i),
       );
     }
@@ -908,7 +1057,8 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Widget _overview(bool wide) {
-    final recent = _documents.toList()..sort((a, b) => b.issueDate.compareTo(a.issueDate));
+    final recent = _documents.toList()
+      ..sort((a, b) => b.issueDate.compareTo(a.issueDate));
     return SingleChildScrollView(
       padding: EdgeInsets.fromLTRB(wide ? 34 : 18, 24, wide ? 34 : 18, 100),
       keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
@@ -966,19 +1116,22 @@ class _HomeScreenState extends State<HomeScreen> {
                     children: [
                       _MetricCard(
                           title: AppTranslations.get('paidInvoices', _lang),
-                          value: CurrencyHelper.format(_paidTotal, _profile.currencyCode),
+                          value: CurrencyHelper.format(
+                              _paidTotal, _profile.currencyCode),
                           icon: Icons.check_circle_outline,
                           color: const Color(0xFF0E9F6E),
                           caption: 'Marked as paid'),
                       _MetricCard(
                           title: AppTranslations.get('outstanding', _lang),
-                          value: CurrencyHelper.format(_outstandingTotal, _profile.currencyCode),
+                          value: CurrencyHelper.format(
+                              _outstandingTotal, _profile.currencyCode),
                           icon: Icons.account_balance_wallet_outlined,
                           color: const Color(0xFFB54708),
                           caption: 'Invoices not yet paid'),
                       _MetricCard(
                           title: AppTranslations.get('openQuotes', _lang),
-                          value: CurrencyHelper.format(_quoteTotal, _profile.currencyCode),
+                          value: CurrencyHelper.format(
+                              _quoteTotal, _profile.currencyCode),
                           icon: Icons.request_quote_outlined,
                           color: _brand,
                           caption: 'Awaiting a decision'),
@@ -998,7 +1151,10 @@ class _HomeScreenState extends State<HomeScreen> {
                   Expanded(
                     child: Text(
                       AppTranslations.get('recentDocuments', _lang),
-                      style: Theme.of(context).textTheme.titleLarge?.copyWith(color: _ink),
+                      style: Theme.of(context)
+                          .textTheme
+                          .titleLarge
+                          ?.copyWith(color: _ink),
                     ),
                   ),
                   TextButton(
@@ -1025,7 +1181,10 @@ class _HomeScreenState extends State<HomeScreen> {
                         .take(5)
                         .map((doc) => _DocumentRow(
                               document: doc,
-                              onOpen: () => _createDocument(doc.kind, existing: doc),
+                              displayStatus:
+                                  effectiveInvoiceStatus(doc, _payments),
+                              onOpen: () =>
+                                  _createDocument(doc.kind, existing: doc),
                               onPdf: () => _printPdf(doc),
                               onShare: () => _shareDocument(doc),
                               onDelete: () => _deleteDocument(doc),
@@ -1062,7 +1221,8 @@ class _HomeScreenState extends State<HomeScreen> {
                             style: Theme.of(context)
                                 .textTheme
                                 .headlineMedium
-                                ?.copyWith(color: _ink, fontSize: wide ? 30 : 25)),
+                                ?.copyWith(
+                                    color: _ink, fontSize: wide ? 30 : 25)),
                         const SizedBox(height: 6),
                         Text(
                           _section == 'Follow-ups'
@@ -1106,17 +1266,23 @@ class _HomeScreenState extends State<HomeScreen> {
                       'Declined',
                       'Void'
                     ]
-                        .map((status) => DropdownMenuItem(value: status, child: Text(status)))
+                        .map((status) => DropdownMenuItem(
+                            value: status, child: Text(status)))
                         .toList(),
-                    onChanged: (value) => setState(() => _filter = value ?? 'All'),
+                    onChanged: (value) =>
+                        setState(() => _filter = value ?? 'All'),
                   ),
                 ],
               ),
               const SizedBox(height: 14),
               if (docs.isEmpty)
                 _EmptyState(
-                  icon: _section == 'Quotes' ? Icons.request_quote_outlined : Icons.receipt_long_outlined,
-                  title: _query.isNotEmpty ? 'No matching documents' : 'Nothing here yet',
+                  icon: _section == 'Quotes'
+                      ? Icons.request_quote_outlined
+                      : Icons.receipt_long_outlined,
+                  title: _query.isNotEmpty
+                      ? 'No matching documents'
+                      : 'Nothing here yet',
                   message: _query.isNotEmpty
                       ? 'Try another search term or clear the status filter.'
                       : _section == 'Follow-ups'
@@ -1128,7 +1294,9 @@ class _HomeScreenState extends State<HomeScreen> {
                           ? 'Create a quote'
                           : 'Create an invoice',
                   onAction: () => _createDocument(
-                    _section == 'Quotes' || _section == 'Follow-ups' ? DocumentKind.quote : DocumentKind.invoice,
+                    _section == 'Quotes' || _section == 'Follow-ups'
+                        ? DocumentKind.quote
+                        : DocumentKind.invoice,
                   ),
                 )
               else
@@ -1138,7 +1306,10 @@ class _HomeScreenState extends State<HomeScreen> {
                         .map(
                           (doc) => _DocumentRow(
                             document: doc,
-                            onOpen: () => _createDocument(doc.kind, existing: doc),
+                            displayStatus:
+                                effectiveInvoiceStatus(doc, _payments),
+                            onOpen: () =>
+                                _createDocument(doc.kind, existing: doc),
                             onPdf: () => _printPdf(doc),
                             onShare: () => _shareDocument(doc),
                             onDelete: () => _deleteDocument(doc),
@@ -1175,15 +1346,20 @@ class _TopBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Container(
         padding: EdgeInsets.symmetric(horizontal: wide ? 34 : 18, vertical: 16),
-        decoration: const BoxDecoration(border: Border(bottom: BorderSide(color: _line))),
+        decoration: const BoxDecoration(
+            border: Border(bottom: BorderSide(color: _line))),
         child: Row(
           children: [
-            if (!wide) IconButton(onPressed: onMenu, icon: const Icon(Icons.menu_rounded)),
+            if (!wide)
+              IconButton(
+                  onPressed: onMenu, icon: const Icon(Icons.menu_rounded)),
             Container(
               width: 38,
               height: 38,
-              decoration: BoxDecoration(color: _brand, borderRadius: BorderRadius.circular(12)),
-              child: const Icon(Icons.account_balance_wallet_rounded, color: Colors.white, size: 21),
+              decoration: BoxDecoration(
+                  color: _brand, borderRadius: BorderRadius.circular(12)),
+              child: const Icon(Icons.account_balance_wallet_rounded,
+                  color: Colors.white, size: 21),
             ),
             const SizedBox(width: 10),
             const Column(
@@ -1191,10 +1367,16 @@ class _TopBar extends StatelessWidget {
               children: [
                 Text('Ledgerly',
                     style: TextStyle(
-                        fontWeight: FontWeight.w800, fontSize: 19, color: _ink, letterSpacing: -0.5)),
+                        fontWeight: FontWeight.w800,
+                        fontSize: 19,
+                        color: _ink,
+                        letterSpacing: -0.5)),
                 Text('GLOBAL INVOICING & ANALYTICS',
                     style: TextStyle(
-                        fontSize: 8, letterSpacing: 1.1, color: _muted, fontWeight: FontWeight.w700)),
+                        fontSize: 8,
+                        letterSpacing: 1.1,
+                        color: _muted,
+                        fontWeight: FontWeight.w700)),
               ],
             ),
             const Spacer(),
@@ -1207,12 +1389,17 @@ class _TopBar extends StatelessWidget {
                   borderRadius: BorderRadius.circular(20),
                   child: Container(
                     margin: const EdgeInsets.only(right: 12),
-                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
                     decoration: BoxDecoration(
-                      color: isPro ? const Color(0xFFFEF3C7) : const Color(0xFFEEF2FF),
+                      color: isPro
+                          ? const Color(0xFFFEF3C7)
+                          : const Color(0xFFEEF2FF),
                       borderRadius: BorderRadius.circular(20),
                       border: Border.all(
-                        color: isPro ? const Color(0xFFF59E0B) : const Color(0xFF6366F1),
+                        color: isPro
+                            ? const Color(0xFFF59E0B)
+                            : const Color(0xFF6366F1),
                       ),
                     ),
                     child: Row(
@@ -1220,7 +1407,9 @@ class _TopBar extends StatelessWidget {
                       children: [
                         Icon(
                           Icons.workspace_premium_rounded,
-                          color: isPro ? const Color(0xFFD97706) : const Color(0xFF4F46E5),
+                          color: isPro
+                              ? const Color(0xFFD97706)
+                              : const Color(0xFF4F46E5),
                           size: 16,
                         ),
                         const SizedBox(width: 4),
@@ -1229,7 +1418,9 @@ class _TopBar extends StatelessWidget {
                           style: TextStyle(
                             fontSize: 11,
                             fontWeight: FontWeight.w800,
-                            color: isPro ? const Color(0xFFB45309) : const Color(0xFF4F46E5),
+                            color: isPro
+                                ? const Color(0xFFB45309)
+                                : const Color(0xFF4F46E5),
                             letterSpacing: 0.5,
                           ),
                         ),
@@ -1255,21 +1446,30 @@ class _TopBar extends StatelessWidget {
             if (wide)
               PopupMenuButton<String>(
                 tooltip: AppTranslations.get('create', langCode),
-                onSelected: (value) => value == 'invoice' ? onNewInvoice() : onNewQuote(),
+                onSelected: (value) =>
+                    value == 'invoice' ? onNewInvoice() : onNewQuote(),
                 itemBuilder: (_) => [
-                  PopupMenuItem(value: 'invoice', child: Text(AppTranslations.get('newInvoice', langCode))),
-                  PopupMenuItem(value: 'quote', child: Text(AppTranslations.get('newQuote', langCode))),
+                  PopupMenuItem(
+                      value: 'invoice',
+                      child: Text(AppTranslations.get('newInvoice', langCode))),
+                  PopupMenuItem(
+                      value: 'quote',
+                      child: Text(AppTranslations.get('newQuote', langCode))),
                 ],
                 child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                  decoration: BoxDecoration(color: _brand, borderRadius: BorderRadius.circular(12)),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                  decoration: BoxDecoration(
+                      color: _brand, borderRadius: BorderRadius.circular(12)),
                   child: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       const Icon(Icons.add, size: 18, color: Colors.white),
                       const SizedBox(width: 7),
                       Text(AppTranslations.get('create', langCode),
-                          style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w700)),
+                          style: const TextStyle(
+                              color: Colors.white,
+                              fontWeight: FontWeight.w700)),
                     ],
                   ),
                 ),
@@ -1302,7 +1502,9 @@ class _SideNavigation extends StatelessWidget {
   Widget build(BuildContext context) => Container(
         width: 245,
         padding: const EdgeInsets.fromLTRB(14, 18, 14, 16),
-        decoration: const BoxDecoration(color: Colors.white, border: Border(right: BorderSide(color: _line))),
+        decoration: const BoxDecoration(
+            color: Colors.white,
+            border: Border(right: BorderSide(color: _line))),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -1310,7 +1512,10 @@ class _SideNavigation extends StatelessWidget {
               padding: EdgeInsets.fromLTRB(12, 16, 12, 20),
               child: Text('WORKSPACE',
                   style: TextStyle(
-                      fontSize: 10, color: _muted, fontWeight: FontWeight.w800, letterSpacing: 1.4)),
+                      fontSize: 10,
+                      color: _muted,
+                      fontWeight: FontWeight.w800,
+                      letterSpacing: 1.4)),
             ),
             ...[
               ('Overview', Icons.space_dashboard_outlined),
@@ -1335,10 +1540,14 @@ class _SideNavigation extends StatelessWidget {
                   selected: selected,
                   selectedTileColor: const Color(0xFFEEEDFF),
                   selectedColor: _brand,
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(11)),
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(11)),
                   leading: Icon(item.$2, size: 20),
                   title: Text(label,
-                      style: TextStyle(fontSize: 13, fontWeight: selected ? FontWeight.w700 : FontWeight.w500)),
+                      style: TextStyle(
+                          fontSize: 13,
+                          fontWeight:
+                              selected ? FontWeight.w700 : FontWeight.w500)),
                   onTap: () => onSelect(item.$1),
                 ),
               );
@@ -1348,16 +1557,21 @@ class _SideNavigation extends StatelessWidget {
               listenable: SubscriptionService.instance,
               builder: (context, _) {
                 final isPro = SubscriptionService.instance.isPro;
-                final remaining = SubscriptionService.instance.remainingFreeDocuments(documentCount);
+                final remaining = SubscriptionService.instance
+                    .remainingFreeDocuments(documentCount);
                 final used = documentCount > 5 ? 5 : documentCount;
 
                 return Container(
                   width: double.infinity,
                   padding: const EdgeInsets.all(14),
                   decoration: BoxDecoration(
-                    color: isPro ? const Color(0xFFF0FDF4) : const Color(0xFFF7F7FF),
+                    color: isPro
+                        ? const Color(0xFFF0FDF4)
+                        : const Color(0xFFF7F7FF),
                     border: Border.all(
-                      color: isPro ? const Color(0xFFBBF7D0) : const Color(0xFFE8E6FF),
+                      color: isPro
+                          ? const Color(0xFFBBF7D0)
+                          : const Color(0xFFE8E6FF),
                     ),
                     borderRadius: BorderRadius.circular(14),
                   ),
@@ -1367,7 +1581,9 @@ class _SideNavigation extends StatelessWidget {
                       Row(
                         children: [
                           Icon(
-                            isPro ? Icons.workspace_premium_rounded : Icons.shield_outlined,
+                            isPro
+                                ? Icons.workspace_premium_rounded
+                                : Icons.shield_outlined,
                             color: isPro ? const Color(0xFF16A34A) : _brand,
                             size: 20,
                           ),
@@ -1386,7 +1602,10 @@ class _SideNavigation extends StatelessWidget {
                       if (isPro) ...[
                         const Text(
                           'Unlimited invoices & quotes, no watermark, PayPal subscribed.',
-                          style: TextStyle(fontSize: 11, color: Color(0xFF166534), height: 1.4),
+                          style: TextStyle(
+                              fontSize: 11,
+                              color: Color(0xFF166534),
+                              height: 1.4),
                         ),
                       ] else ...[
                         Text(
@@ -1408,13 +1627,17 @@ class _SideNavigation extends StatelessWidget {
                           width: double.infinity,
                           child: FilledButton(
                             style: FilledButton.styleFrom(
-                              backgroundColor: const Color(0xFFFFC439), // PayPal Gold
+                              backgroundColor:
+                                  const Color(0xFFFFC439), // PayPal Gold
                               foregroundColor: const Color(0xFF003087),
                               padding: const EdgeInsets.symmetric(vertical: 8),
-                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                              shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(8)),
                             ),
                             onPressed: () => PaywallScreen.showPaywall(context),
-                            child: const Text('Upgrade Pro', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 12)),
+                            child: const Text('Upgrade Pro',
+                                style: TextStyle(
+                                    fontWeight: FontWeight.w800, fontSize: 12)),
                           ),
                         ),
                       ],
@@ -1456,10 +1679,12 @@ class _MetricCard extends StatelessWidget {
                       width: 34,
                       height: 34,
                       decoration: BoxDecoration(
-                          color: color.withValues(alpha: .1), borderRadius: BorderRadius.circular(10)),
+                          color: color.withValues(alpha: .1),
+                          borderRadius: BorderRadius.circular(10)),
                       child: Icon(icon, color: color, size: 18)),
                   const Spacer(),
-                  const Icon(Icons.more_horiz, color: Color(0xFFB0B7C5), size: 20),
+                  const Icon(Icons.more_horiz,
+                      color: Color(0xFFB0B7C5), size: 20),
                 ],
               ),
               Column(
@@ -1469,10 +1694,18 @@ class _MetricCard extends StatelessWidget {
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: const TextStyle(
-                          fontSize: 21, fontWeight: FontWeight.w800, color: _ink, letterSpacing: -.6)),
+                          fontSize: 21,
+                          fontWeight: FontWeight.w800,
+                          color: _ink,
+                          letterSpacing: -.6)),
                   const SizedBox(height: 3),
-                  Text(title, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: _ink)),
-                  Text(caption, style: const TextStyle(fontSize: 10, color: _muted)),
+                  Text(title,
+                      style: const TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w700,
+                          color: _ink)),
+                  Text(caption,
+                      style: const TextStyle(fontSize: 10, color: _muted)),
                 ],
               ),
             ],
@@ -1482,16 +1715,25 @@ class _MetricCard extends StatelessWidget {
 }
 
 class _DocumentRow extends StatelessWidget {
-  const _DocumentRow(
-      {required this.document, required this.onOpen, required this.onPdf, required this.onShare, required this.onDelete});
+  const _DocumentRow({
+    required this.document,
+    required this.onOpen,
+    required this.onPdf,
+    required this.onShare,
+    required this.onDelete,
+    this.displayStatus,
+  });
 
   final BusinessDocument document;
+  final String? displayStatus;
   final VoidCallback onOpen;
   final VoidCallback onPdf;
   final VoidCallback onShare;
   final VoidCallback onDelete;
 
-  Color get _statusColor => switch (document.status) {
+  String get _status => displayStatus ?? document.status;
+
+  Color get _statusColor => switch (_status) {
         'Paid' || 'Accepted' => const Color(0xFF027A48),
         'Overdue' || 'Declined' => const Color(0xFFB42318),
         'Sent' || 'Pending' => const Color(0xFFB54708),
@@ -1508,7 +1750,9 @@ class _DocumentRow extends StatelessWidget {
               Container(
                   width: 40,
                   height: 40,
-                  decoration: BoxDecoration(color: const Color(0xFFF0F2FF), borderRadius: BorderRadius.circular(11)),
+                  decoration: BoxDecoration(
+                      color: const Color(0xFFF0F2FF),
+                      borderRadius: BorderRadius.circular(11)),
                   child: Icon(
                       document.kind == DocumentKind.invoice
                           ? Icons.receipt_long_outlined
@@ -1521,12 +1765,16 @@ class _DocumentRow extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                        document.clientName.isEmpty ? 'Unnamed client' : document.clientName,
+                        document.clientName.isEmpty
+                            ? 'Unnamed client'
+                            : document.clientName,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(fontWeight: FontWeight.w700, color: _ink)),
+                        style: const TextStyle(
+                            fontWeight: FontWeight.w700, color: _ink)),
                     const SizedBox(height: 4),
-                    Text('${document.number} • ${dateLabel(document.issueDate)}',
+                    Text(
+                        '${document.number} • ${dateLabel(document.issueDate)}',
                         style: const TextStyle(fontSize: 11, color: _muted)),
                   ],
                 ),
@@ -1535,11 +1783,12 @@ class _DocumentRow extends StatelessWidget {
                 Expanded(
                   child: Align(
                     alignment: Alignment.centerLeft,
-                    child: _StatusPill(label: document.status, color: _statusColor),
+                    child: _StatusPill(label: _status, color: _statusColor),
                   ),
                 ),
               Text(CurrencyHelper.format(document.total, document.currencyCode),
-                  style: const TextStyle(fontWeight: FontWeight.w800, color: _ink)),
+                  style: const TextStyle(
+                      fontWeight: FontWeight.w800, color: _ink)),
               IconButton(
                 tooltip: 'Share via WhatsApp, Email, etc.',
                 icon: const Icon(Icons.share_rounded, size: 20, color: _brand),
@@ -1556,7 +1805,9 @@ class _DocumentRow extends StatelessWidget {
                 itemBuilder: (_) => const [
                   PopupMenuItem(value: 'edit', child: Text('Edit')),
                   PopupMenuItem(value: 'pdf', child: Text('View / Print PDF')),
-                  PopupMenuItem(value: 'share', child: Text('Share via Email / WhatsApp')),
+                  PopupMenuItem(
+                      value: 'share',
+                      child: Text('Share via Email / WhatsApp')),
                   PopupMenuItem(value: 'delete', child: Text('Delete')),
                 ],
               ),
@@ -1580,7 +1831,8 @@ class _StatusPill extends StatelessWidget {
         ),
         child: Text(
           label,
-          style: TextStyle(color: color, fontWeight: FontWeight.w700, fontSize: 11),
+          style: TextStyle(
+              color: color, fontWeight: FontWeight.w700, fontSize: 11),
         ),
       );
 }
@@ -1618,14 +1870,20 @@ class _EmptyState extends StatelessWidget {
                     width: 54,
                     height: 54,
                     decoration: BoxDecoration(
-                        color: _brand.withValues(alpha: .08), borderRadius: BorderRadius.circular(16)),
+                        color: _brand.withValues(alpha: .08),
+                        borderRadius: BorderRadius.circular(16)),
                     child: Icon(icon, color: _brand, size: 28),
                   ),
                   const SizedBox(height: 16),
                   Text(title,
-                      style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w800, color: _ink)),
+                      style: const TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.w800,
+                          color: _ink)),
                   const SizedBox(height: 6),
-                  Text(message, textAlign: TextAlign.center, style: const TextStyle(color: _muted, height: 1.4)),
+                  Text(message,
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(color: _muted, height: 1.4)),
                   const SizedBox(height: 20),
                   Wrap(
                     spacing: 10,
@@ -1638,7 +1896,9 @@ class _EmptyState extends StatelessWidget {
                         label: Text(actionLabel),
                       ),
                       if (secondaryLabel != null && onSecondary != null)
-                        OutlinedButton(onPressed: onSecondary, child: Text(secondaryLabel!)),
+                        OutlinedButton(
+                            onPressed: onSecondary,
+                            child: Text(secondaryLabel!)),
                     ],
                   ),
                 ],
@@ -1654,6 +1914,7 @@ class DocumentEditorDialog extends StatefulWidget {
     super.key,
     required this.kind,
     required this.nextNumber,
+    this.currencyLocked = false,
     this.existing,
     this.customers = const [],
     this.items = const [],
@@ -1664,6 +1925,7 @@ class DocumentEditorDialog extends StatefulWidget {
 
   final DocumentKind kind;
   final String nextNumber;
+  final bool currencyLocked;
   final BusinessDocument? existing;
   final List<Customer> customers;
   final List<Item> items;
@@ -1689,6 +1951,7 @@ class _DocumentEditorDialogState extends State<DocumentEditorDialog> {
   late String _currency;
   late List<_LineDraft> _lines;
   String _customerId = '';
+  String _customerNameSnapshot = '';
 
   @override
   void initState() {
@@ -1705,6 +1968,7 @@ class _DocumentEditorDialogState extends State<DocumentEditorDialog> {
     _status = old?.status ?? 'Draft';
     _currency = old?.currencyCode ?? widget.currencyCode;
     _customerId = old?.customerId ?? '';
+    _customerNameSnapshot = old?.clientName ?? '';
     _lines = (old?.lines ?? []).map(_LineDraft.fromLine).toList();
     if (_lines.isEmpty) _lines = [_LineDraft()];
   }
@@ -1723,20 +1987,24 @@ class _DocumentEditorDialogState extends State<DocumentEditorDialog> {
     super.dispose();
   }
 
-  double get _subtotal => (_lines.fold<double>(0.0, (sum, line) => sum + line.amount) * 100).roundToDouble() / 100;
+  double get _subtotal =>
+      roundMoney(_lines.fold<double>(0.0, (sum, line) => sum + line.amount));
   double get _discountValue {
     final value = double.tryParse(_discount.text) ?? 0;
     if (!value.isFinite || value <= 0) return 0;
-    return value.clamp(0.0, _subtotal).toDouble();
+    return roundMoney(value.clamp(0.0, _subtotal).toDouble());
   }
+
   double get _taxValue {
     final value = double.tryParse(_tax.text) ?? 0;
     return value.isFinite ? value.clamp(0.0, 100.0).toDouble() : 0.0;
   }
+
   double get _total {
-    final taxable = (_subtotal - _discountValue).clamp(0.0, double.infinity).toDouble();
-    final tax = (taxable * _taxValue / 100 * 100).roundToDouble() / 100;
-    return ((taxable + tax) * 100).roundToDouble() / 100;
+    final taxable =
+        (_subtotal - _discountValue).clamp(0.0, double.infinity).toDouble();
+    final tax = roundMoney(taxable * _taxValue / 100);
+    return roundMoney(taxable + tax);
   }
 
   Future<DateTime?> _chooseDate(DateTime initial) => showDatePicker(
@@ -1755,14 +2023,16 @@ class _DocumentEditorDialogState extends State<DocumentEditorDialog> {
           width: 400,
           height: 350,
           child: widget.customers.isEmpty
-              ? const Center(child: Text('No saved clients. Add clients in Clients tab.'))
+              ? const Center(
+                  child: Text('No saved clients. Add clients in Clients tab.'))
               : ListView.separated(
                   itemCount: widget.customers.length,
                   separatorBuilder: (_, __) => const Divider(height: 1),
                   itemBuilder: (context, idx) {
                     final c = widget.customers[idx];
                     return ListTile(
-                      title: Text(c.name, style: const TextStyle(fontWeight: FontWeight.bold)),
+                      title: Text(c.name,
+                          style: const TextStyle(fontWeight: FontWeight.bold)),
                       subtitle: Text(c.email.isNotEmpty ? c.email : c.phone),
                       onTap: () => Navigator.pop(ctx, c),
                     );
@@ -1770,7 +2040,8 @@ class _DocumentEditorDialogState extends State<DocumentEditorDialog> {
                 ),
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+          TextButton(
+              onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
         ],
       ),
     );
@@ -1780,6 +2051,7 @@ class _DocumentEditorDialogState extends State<DocumentEditorDialog> {
         _client.text = selected.name;
         _email.text = selected.email;
         _customerId = selected.id;
+        _customerNameSnapshot = selected.name;
       });
     }
   }
@@ -1793,44 +2065,72 @@ class _DocumentEditorDialogState extends State<DocumentEditorDialog> {
           width: 400,
           height: 350,
           child: widget.items.isEmpty
-              ? const Center(child: Text('No saved items. Add products/services in Items tab.'))
+              ? const Center(
+                  child: Text(
+                      'No saved items. Add products/services in Items tab.'))
               : ListView.separated(
                   itemCount: widget.items.length,
                   separatorBuilder: (_, __) => const Divider(height: 1),
                   itemBuilder: (context, idx) {
                     final item = widget.items[idx];
                     return ListTile(
-                      title: Text(item.name, style: const TextStyle(fontWeight: FontWeight.bold)),
-                      subtitle: Text('${item.category} • ${CurrencyHelper.format(item.unitPrice, _currency)} / ${item.unit}'),
+                      title: Text(item.name,
+                          style: const TextStyle(fontWeight: FontWeight.bold)),
+                      subtitle: Text(
+                          '${item.category} • ${CurrencyHelper.format(item.unitPrice, _currency)} / ${item.unit}'),
                       onTap: () => Navigator.pop(ctx, item),
                     );
                   },
                 ),
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+          TextButton(
+              onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
         ],
       ),
     );
 
     if (selected != null) {
+      final hasOtherDescription = _lines.any((other) =>
+          !identical(other, line) && other.description.text.trim().isNotEmpty);
       setState(() {
         line.description.text = selected.name;
         line.price.text = selected.unitPrice.toStringAsFixed(2);
-        _tax.text = selected.taxRate.toStringAsFixed(1);
+        if (!hasOtherDescription) {
+          _tax.text = selected.taxRate.toStringAsFixed(1);
+        }
       });
+      if (hasOtherDescription &&
+          (double.tryParse(_tax.text) ?? 0) != selected.taxRate &&
+          mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+              content: Text(
+                  'This document applies one tax rate to all lines. Review the tax rate in Totals and terms.')),
+        );
+      }
     }
   }
 
   void _submit() {
     if (!_formKey.currentState!.validate()) return;
-    if (_dueDate.isBefore(DateTime(_issueDate.year, _issueDate.month, _issueDate.day))) {
+    final old = widget.existing;
+    if (widget.currencyLocked && old != null && _currency != old.currencyCode) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Due date cannot be earlier than the issue date.')),
+        const SnackBar(
+            content: Text(
+                'Currency cannot be changed after payments have been recorded.')),
       );
       return;
     }
-    final old = widget.existing;
+    if (_dueDate.isBefore(
+        DateTime(_issueDate.year, _issueDate.month, _issueDate.day))) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+            content: Text('Due date cannot be earlier than the issue date.')),
+      );
+      return;
+    }
     final doc = BusinessDocument(
       id: old?.id ?? const Uuid().v4(),
       number: _number.text.trim(),
@@ -1861,7 +2161,9 @@ class _DocumentEditorDialogState extends State<DocumentEditorDialog> {
   Widget build(BuildContext context) => Dialog.fullscreen(
         child: Scaffold(
           appBar: AppBar(
-            leading: IconButton(icon: const Icon(Icons.close), onPressed: () => Navigator.pop(context)),
+            leading: IconButton(
+                icon: const Icon(Icons.close),
+                onPressed: () => Navigator.pop(context)),
             title: Text(
                 '${widget.existing == null ? 'New' : 'Edit'} ${widget.kind == DocumentKind.invoice ? 'invoice' : 'quote'}'),
             actions: [
@@ -1896,12 +2198,17 @@ class _DocumentEditorDialogState extends State<DocumentEditorDialog> {
                               Row(
                                 children: [
                                   Expanded(
-                                    child: Text('Document details', style: Theme.of(context).textTheme.titleLarge),
+                                    child: Text('Document details',
+                                        style: Theme.of(context)
+                                            .textTheme
+                                            .titleLarge),
                                   ),
                                   if (widget.customers.isNotEmpty)
                                     OutlinedButton.icon(
                                       onPressed: _pickCustomer,
-                                      icon: const Icon(Icons.person_search_outlined, size: 16),
+                                      icon: const Icon(
+                                          Icons.person_search_outlined,
+                                          size: 16),
                                       label: const Text('Pick saved client'),
                                     ),
                                 ],
@@ -1909,71 +2216,127 @@ class _DocumentEditorDialogState extends State<DocumentEditorDialog> {
                               const SizedBox(height: 18),
                               LayoutBuilder(
                                 builder: (context, constraints) {
-                                  final cols = constraints.maxWidth > 650 ? 2 : 1;
-                                  return _ResponsiveFields(columns: cols, children: [
-                                    TextFormField(
-                                      controller: _number,
-                                      decoration: const InputDecoration(labelText: 'Document number'),
-                                      validator: (v) {
-                                        final value = v?.trim() ?? '';
-                                        if (value.isEmpty) return 'Required';
-                                        if (widget.existingNumbers.contains(value.toLowerCase())) {
-                                          return 'This document number is already in use';
-                                        }
-                                        return null;
-                                      },
-                                    ),
-                                    DropdownButtonFormField<String>(
-                                      initialValue: _status,
-                                      decoration: const InputDecoration(labelText: 'Status'),
-                                      items: (widget.kind == DocumentKind.invoice
-                                              ? ['Draft', 'Sent', 'Pending', 'Paid', 'Overdue', 'Void']
-                                              : ['Draft', 'Sent', 'Pending', 'Accepted', 'Declined'])
-                                          .map((value) => DropdownMenuItem(value: value, child: Text(value)))
-                                          .toList(),
-                                      onChanged: (value) => setState(() => _status = value ?? 'Draft'),
-                                    ),
-                                    TextFormField(
-                                      controller: _client,
-                                      decoration: const InputDecoration(labelText: 'Client / business name'),
-                                      validator: (v) => v == null || v.trim().isEmpty ? 'Enter a client name' : null,
-                                    ),
-                                    TextFormField(
-                                      controller: _email,
-                                      keyboardType: TextInputType.emailAddress,
-                                      decoration: const InputDecoration(labelText: 'Client email (optional)'),
-                                      validator: (v) {
-                                        if (v == null || v.trim().isEmpty) return null;
-                                        return RegExp(r'^[^@\s]+@[^@\s]+\.[^@\s]+$').hasMatch(v.trim())
-                                            ? null
-                                            : 'Enter a valid email';
-                                      },
-                                    ),
-                                    DropdownButtonFormField<String>(
-                                      initialValue: _currency,
-                                      decoration: const InputDecoration(labelText: 'Currency'),
-                                      items: CurrencyHelper.currencies
-                                          .map((c) => DropdownMenuItem(value: c.code, child: Text('${c.code} (${c.symbol})')))
-                                          .toList(),
-                                      onChanged: (value) => setState(() => _currency = value ?? 'USD'),
-                                    ),
-                                    _DateButton(
-                                      label: 'Issue date',
-                                      date: _issueDate,
-                                      onTap: () async {
-                                        final date = await _chooseDate(_issueDate);
-                                        if (date != null) setState(() => _issueDate = date);
-                                      },
-                                    ),
-                                    _DateButton(
-                                      label: 'Due date',
-                                      date: _dueDate,
-                                      onTap: () async {
-                                        final date = await _chooseDate(_dueDate);
-                                        if (date != null) setState(() => _dueDate = date);
-                                      },
-                                    ),
-                                  ]);
+                                  final cols =
+                                      constraints.maxWidth > 650 ? 2 : 1;
+                                  return _ResponsiveFields(
+                                      columns: cols,
+                                      children: [
+                                        TextFormField(
+                                          controller: _number,
+                                          decoration: const InputDecoration(
+                                              labelText: 'Document number'),
+                                          validator: (v) {
+                                            final value = v?.trim() ?? '';
+                                            if (value.isEmpty) {
+                                              return 'Required';
+                                            }
+                                            if (widget.existingNumbers.contains(
+                                                value.toLowerCase())) {
+                                              return 'This document number is already in use';
+                                            }
+                                            return null;
+                                          },
+                                        ),
+                                        DropdownButtonFormField<String>(
+                                          initialValue: _status,
+                                          decoration: const InputDecoration(
+                                              labelText: 'Status'),
+                                          items: (widget.kind ==
+                                                      DocumentKind.invoice
+                                                  ? [
+                                                      'Draft',
+                                                      'Sent',
+                                                      'Pending',
+                                                      'Paid',
+                                                      'Overdue',
+                                                      'Void'
+                                                    ]
+                                                  : [
+                                                      'Draft',
+                                                      'Sent',
+                                                      'Pending',
+                                                      'Accepted',
+                                                      'Declined'
+                                                    ])
+                                              .map((value) => DropdownMenuItem(
+                                                  value: value,
+                                                  child: Text(value)))
+                                              .toList(),
+                                          onChanged: (value) => setState(
+                                              () => _status = value ?? 'Draft'),
+                                        ),
+                                        TextFormField(
+                                          controller: _client,
+                                          decoration: const InputDecoration(
+                                              labelText:
+                                                  'Client / business name'),
+                                          onChanged: (value) {
+                                            if (_customerId.isNotEmpty &&
+                                                value.trim() !=
+                                                    _customerNameSnapshot) {
+                                              _customerId = '';
+                                              _customerNameSnapshot = '';
+                                            }
+                                          },
+                                          validator: (v) =>
+                                              v == null || v.trim().isEmpty
+                                                  ? 'Enter a client name'
+                                                  : null,
+                                        ),
+                                        TextFormField(
+                                          controller: _email,
+                                          keyboardType:
+                                              TextInputType.emailAddress,
+                                          decoration: const InputDecoration(
+                                              labelText:
+                                                  'Client email (optional)'),
+                                          validator: (v) {
+                                            if (v == null || v.trim().isEmpty) {
+                                              return null;
+                                            }
+                                            return RegExp(
+                                                        r'^[^@\s]+@[^@\s]+\.[^@\s]+$')
+                                                    .hasMatch(v.trim())
+                                                ? null
+                                                : 'Enter a valid email';
+                                          },
+                                        ),
+                                        DropdownButtonFormField<String>(
+                                          initialValue: _currency,
+                                          decoration: const InputDecoration(
+                                              labelText: 'Currency'),
+                                          items: CurrencyHelper.currencies
+                                              .map((c) => DropdownMenuItem(
+                                                  value: c.code,
+                                                  child: Text(
+                                                      '${c.code} (${c.symbol})')))
+                                              .toList(),
+                                          onChanged: (value) => setState(
+                                              () => _currency = value ?? 'USD'),
+                                        ),
+                                        _DateButton(
+                                          label: 'Issue date',
+                                          date: _issueDate,
+                                          onTap: () async {
+                                            final date =
+                                                await _chooseDate(_issueDate);
+                                            if (date != null) {
+                                              setState(() => _issueDate = date);
+                                            }
+                                          },
+                                        ),
+                                        _DateButton(
+                                          label: 'Due date',
+                                          date: _dueDate,
+                                          onTap: () async {
+                                            final date =
+                                                await _chooseDate(_dueDate);
+                                            if (date != null) {
+                                              setState(() => _dueDate = date);
+                                            }
+                                          },
+                                        ),
+                                      ]);
                                 },
                               ),
                             ],
@@ -1990,10 +2353,14 @@ class _DocumentEditorDialogState extends State<DocumentEditorDialog> {
                               Row(
                                 children: [
                                   Expanded(
-                                    child: Text('Line items', style: Theme.of(context).textTheme.titleLarge),
+                                    child: Text('Line items',
+                                        style: Theme.of(context)
+                                            .textTheme
+                                            .titleLarge),
                                   ),
                                   OutlinedButton.icon(
-                                    onPressed: () => setState(() => _lines.add(_LineDraft())),
+                                    onPressed: () => setState(
+                                        () => _lines.add(_LineDraft())),
                                     icon: const Icon(Icons.add, size: 17),
                                     label: const Text('Add item'),
                                   ),
@@ -2011,12 +2378,17 @@ class _DocumentEditorDialogState extends State<DocumentEditorDialog> {
                                         children: [
                                           Expanded(
                                             child: Text('Item ${index + 1}',
-                                                style: const TextStyle(fontWeight: FontWeight.w700)),
+                                                style: const TextStyle(
+                                                    fontWeight:
+                                                        FontWeight.w700)),
                                           ),
                                           if (widget.items.isNotEmpty)
                                             TextButton.icon(
-                                              onPressed: () => _pickCatalogItem(line),
-                                              icon: const Icon(Icons.inventory_2_outlined, size: 15),
+                                              onPressed: () =>
+                                                  _pickCatalogItem(line),
+                                              icon: const Icon(
+                                                  Icons.inventory_2_outlined,
+                                                  size: 15),
                                               label: const Text('Catalog Item'),
                                             ),
                                           if (_lines.length > 1)
@@ -2026,51 +2398,87 @@ class _DocumentEditorDialogState extends State<DocumentEditorDialog> {
                                                 line.dispose();
                                                 _lines.remove(line);
                                               }),
-                                              icon: const Icon(Icons.delete_outline, color: Color(0xFFB42318)),
+                                              icon: const Icon(
+                                                  Icons.delete_outline,
+                                                  color: Color(0xFFB42318)),
                                             ),
                                         ],
                                       ),
                                       LayoutBuilder(
                                         builder: (context, constraints) {
-                                          final cols = constraints.maxWidth > 650 ? 3 : 1;
-                                          return _ResponsiveFields(columns: cols, children: [
-                                            TextFormField(
-                                              controller: line.description,
-                                              decoration: const InputDecoration(labelText: 'Description'),
-                                              validator: (v) => v == null || v.trim().isEmpty ? 'Required' : null,
-                                            ),
-                                            TextFormField(
-                                              controller: line.quantity,
-                                              keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                                              decoration: const InputDecoration(labelText: 'Quantity'),
-                                              validator: (v) {
-                                                final n = double.tryParse(v ?? '');
-                                                return n == null || !n.isFinite || n <= 0 || n > 1e9
-                                                    ? 'Enter a quantity above zero (maximum 1,000,000,000)'
-                                                    : null;
-                                              },
-                                              onChanged: (_) => setState(() {}),
-                                            ),
-                                            TextFormField(
-                                              controller: line.price,
-                                              keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                                              decoration: const InputDecoration(labelText: 'Unit price'),
-                                              validator: (v) {
-                                                final n = double.tryParse(v ?? '');
-                                                return n == null || !n.isFinite || n < 0 || n > 1e12
-                                                    ? 'Enter a valid price (maximum 1,000,000,000,000)'
-                                                    : null;
-                                              },
-                                              onChanged: (_) => setState(() {}),
-                                            ),
-                                          ]);
+                                          final cols =
+                                              constraints.maxWidth > 650
+                                                  ? 3
+                                                  : 1;
+                                          return _ResponsiveFields(
+                                              columns: cols,
+                                              children: [
+                                                TextFormField(
+                                                  controller: line.description,
+                                                  decoration:
+                                                      const InputDecoration(
+                                                          labelText:
+                                                              'Description'),
+                                                  validator: (v) => v == null ||
+                                                          v.trim().isEmpty
+                                                      ? 'Required'
+                                                      : null,
+                                                ),
+                                                TextFormField(
+                                                  controller: line.quantity,
+                                                  keyboardType:
+                                                      const TextInputType
+                                                          .numberWithOptions(
+                                                          decimal: true),
+                                                  decoration:
+                                                      const InputDecoration(
+                                                          labelText:
+                                                              'Quantity'),
+                                                  validator: (v) {
+                                                    final n = double.tryParse(
+                                                        v ?? '');
+                                                    return n == null ||
+                                                            !n.isFinite ||
+                                                            n <= 0 ||
+                                                            n > 1e9
+                                                        ? 'Enter a quantity above zero (maximum 1,000,000,000)'
+                                                        : null;
+                                                  },
+                                                  onChanged: (_) =>
+                                                      setState(() {}),
+                                                ),
+                                                TextFormField(
+                                                  controller: line.price,
+                                                  keyboardType:
+                                                      const TextInputType
+                                                          .numberWithOptions(
+                                                          decimal: true),
+                                                  decoration:
+                                                      const InputDecoration(
+                                                          labelText:
+                                                              'Unit price'),
+                                                  validator: (v) {
+                                                    final n = double.tryParse(
+                                                        v ?? '');
+                                                    return n == null ||
+                                                            !n.isFinite ||
+                                                            n < 0 ||
+                                                            n > 1e12
+                                                        ? 'Enter a valid price (maximum 1,000,000,000,000)'
+                                                        : null;
+                                                  },
+                                                  onChanged: (_) =>
+                                                      setState(() {}),
+                                                ),
+                                              ]);
                                         },
                                       ),
                                       Align(
                                         alignment: Alignment.centerRight,
                                         child: Text(
                                           'Line total: ${CurrencyHelper.format(line.amount, _currency)}',
-                                          style: const TextStyle(fontWeight: FontWeight.w700),
+                                          style: const TextStyle(
+                                              fontWeight: FontWeight.w700),
                                         ),
                                       ),
                                     ],
@@ -2088,49 +2496,80 @@ class _DocumentEditorDialogState extends State<DocumentEditorDialog> {
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              Text('Totals and terms', style: Theme.of(context).textTheme.titleLarge),
+                              Text('Totals and terms',
+                                  style:
+                                      Theme.of(context).textTheme.titleLarge),
                               const SizedBox(height: 16),
                               LayoutBuilder(
                                 builder: (context, constraints) {
-                                  final cols = constraints.maxWidth > 650 ? 2 : 1;
-                                  return _ResponsiveFields(columns: cols, children: [
-                                    TextFormField(
-                                      controller: _discount,
-                                      keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                                      decoration: const InputDecoration(labelText: 'Discount amount'),
-                                      onChanged: (_) => setState(() {}),
-                                      validator: (v) {
-                                        final n = double.tryParse(v ?? '');
-                                        return n == null || !n.isFinite || n < 0 ? 'Enter zero or more' : null;
-                                      },
-                                    ),
-                                    TextFormField(
-                                      controller: _tax,
-                                      keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                                      decoration: const InputDecoration(labelText: 'Tax rate (%)'),
-                                      onChanged: (_) => setState(() {}),
-                                      validator: (v) {
-                                        final n = double.tryParse(v ?? '');
-                                        return n == null || !n.isFinite || n < 0 || n > 100 ? 'Use 0–100%' : null;
-                                      },
-                                    ),
-                                  ]);
+                                  final cols =
+                                      constraints.maxWidth > 650 ? 2 : 1;
+                                  return _ResponsiveFields(
+                                      columns: cols,
+                                      children: [
+                                        TextFormField(
+                                          controller: _discount,
+                                          keyboardType: const TextInputType
+                                              .numberWithOptions(decimal: true),
+                                          decoration: const InputDecoration(
+                                              labelText: 'Discount amount'),
+                                          onChanged: (_) => setState(() {}),
+                                          validator: (v) {
+                                            final n = double.tryParse(v ?? '');
+                                            return n == null ||
+                                                    !n.isFinite ||
+                                                    n < 0
+                                                ? 'Enter zero or more'
+                                                : null;
+                                          },
+                                        ),
+                                        TextFormField(
+                                          controller: _tax,
+                                          keyboardType: const TextInputType
+                                              .numberWithOptions(decimal: true),
+                                          decoration: const InputDecoration(
+                                              labelText: 'Tax rate (%)'),
+                                          onChanged: (_) => setState(() {}),
+                                          validator: (v) {
+                                            final n = double.tryParse(v ?? '');
+                                            return n == null ||
+                                                    !n.isFinite ||
+                                                    n < 0 ||
+                                                    n > 100
+                                                ? 'Use 0–100%'
+                                                : null;
+                                          },
+                                        ),
+                                      ]);
                                 },
                               ),
                               const SizedBox(height: 16),
-                              _TotalLine(label: 'Subtotal', value: CurrencyHelper.format(_subtotal, _currency)),
-                              _TotalLine(label: 'Discount', value: '-${CurrencyHelper.format(_discountValue, _currency)}'),
+                              _TotalLine(
+                                  label: 'Subtotal',
+                                  value: CurrencyHelper.format(
+                                      _subtotal, _currency)),
+                              _TotalLine(
+                                  label: 'Discount',
+                                  value:
+                                      '-${CurrencyHelper.format(_discountValue, _currency)}'),
                               _TotalLine(
                                   label: 'Tax',
-                                  value: CurrencyHelper.format(_total - (_subtotal - _discountValue), _currency)),
+                                  value: CurrencyHelper.format(
+                                      _total - (_subtotal - _discountValue),
+                                      _currency)),
                               const Divider(height: 24),
-                              _TotalLine(label: 'Total due', value: CurrencyHelper.format(_total, _currency), bold: true),
+                              _TotalLine(
+                                  label: 'Total due',
+                                  value:
+                                      CurrencyHelper.format(_total, _currency),
+                                  bold: true),
                               const SizedBox(height: 14),
                               TextFormField(
                                 controller: _notes,
                                 maxLines: 3,
                                 decoration: const InputDecoration(
-                                    labelText: 'Notes and terms', alignLabelWithHint: true),
+                                    labelText: 'Notes and terms',
+                                    alignLabelWithHint: true),
                               ),
                             ],
                           ),
@@ -2156,7 +2595,11 @@ class _DocumentEditorDialogState extends State<DocumentEditorDialog> {
 }
 
 class _LineDraft {
-  _LineDraft({String? id, String description = '', String quantity = '1', String price = '0'})
+  _LineDraft(
+      {String? id,
+      String description = '',
+      String quantity = '1',
+      String price = '0'})
       : id = id ?? const Uuid().v4(),
         description = TextEditingController(text: description),
         quantity = TextEditingController(text: quantity),
@@ -2172,8 +2615,7 @@ class _LineDraft {
     final p = double.tryParse(price.text) ?? 0;
     final quantityValue = q.isFinite ? q.clamp(0.0, 1e9).toDouble() : 0.0;
     final priceValue = p.isFinite ? p.clamp(0.0, 1e12).toDouble() : 0.0;
-    final value = quantityValue * priceValue;
-    return value.isFinite ? (value * 100).roundToDouble() / 100 : 0.0;
+    return roundMoney(quantityValue * priceValue);
   }
 
   factory _LineDraft.fromLine(DocumentLine line) => _LineDraft(
@@ -2200,7 +2642,8 @@ class _ResponsiveFields extends StatelessWidget {
     if (columns == 1) {
       return Column(
           children: children
-              .map((child) => Padding(padding: const EdgeInsets.only(bottom: 12), child: child))
+              .map((child) => Padding(
+                  padding: const EdgeInsets.only(bottom: 12), child: child))
               .toList());
     }
     return Column(
@@ -2211,12 +2654,19 @@ class _ResponsiveFields extends StatelessWidget {
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                for (var j = i; j < (i + columns < children.length ? i + columns : children.length); j++) ...[
+                for (var j = i;
+                    j <
+                        (i + columns < children.length
+                            ? i + columns
+                            : children.length);
+                    j++) ...[
                   if (j > i) const SizedBox(width: 12),
                   Expanded(child: children[j]),
                 ],
                 if ((children.length - i) < columns)
-                  for (var pad = 0; pad < columns - (children.length - i); pad++)
+                  for (var pad = 0;
+                      pad < columns - (children.length - i);
+                      pad++)
                     const Expanded(child: SizedBox()),
               ],
             ),
@@ -2227,7 +2677,8 @@ class _ResponsiveFields extends StatelessWidget {
 }
 
 class _DateButton extends StatelessWidget {
-  const _DateButton({required this.label, required this.date, required this.onTap});
+  const _DateButton(
+      {required this.label, required this.date, required this.onTap});
   final String label;
   final DateTime date;
   final VoidCallback onTap;
@@ -2238,14 +2689,16 @@ class _DateButton extends StatelessWidget {
         borderRadius: BorderRadius.circular(12),
         child: InputDecorator(
           decoration: InputDecoration(
-              labelText: label, suffixIcon: const Icon(Icons.calendar_month_outlined, size: 18)),
+              labelText: label,
+              suffixIcon: const Icon(Icons.calendar_month_outlined, size: 18)),
           child: Text(dateLabel(date)),
         ),
       );
 }
 
 class _TotalLine extends StatelessWidget {
-  const _TotalLine({required this.label, required this.value, this.bold = false});
+  const _TotalLine(
+      {required this.label, required this.value, this.bold = false});
   final String label;
   final String value;
   final bool bold;
@@ -2258,7 +2711,8 @@ class _TotalLine extends StatelessWidget {
             Expanded(
               child: Text(label,
                   style: TextStyle(
-                      color: bold ? _ink : _muted, fontWeight: bold ? FontWeight.w800 : FontWeight.w500)),
+                      color: bold ? _ink : _muted,
+                      fontWeight: bold ? FontWeight.w800 : FontWeight.w500)),
             ),
             Text(value,
                 style: TextStyle(

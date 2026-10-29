@@ -45,18 +45,24 @@ Deno.serve(async (req) => {
       : "active";
     const originalId = event.original_transaction_id ?? event.transaction_id ?? eventId;
     const externalId = String(originalId);
+    const eventTimestamp = Number(event.event_timestamp_ms);
+    if (!Number.isFinite(eventTimestamp)) {
+      return json({ error: "RevenueCat event has no valid timestamp" }, 400);
+    }
     const expiryMs = event.expiration_at_ms;
-    const periodEnd = typeof expiryMs === "number" ? new Date(expiryMs).toISOString() : null;
-    const { error } = await admin.from("subscription_entitlements").upsert({
-      user_id: userId,
-      provider: "revenuecat",
-      external_subscription_id: externalId,
-      product_id: typeof event.product_id === "string" ? event.product_id : null,
-      status,
-      current_period_end: periodEnd,
-      last_event_id: eventId,
-      updated_at: new Date().toISOString(),
-    }, { onConflict: "provider,external_subscription_id" });
+    const expiryTimestamp = expiryMs == null ? null : Number(expiryMs);
+    if (expiryTimestamp != null && !Number.isFinite(expiryTimestamp)) {
+      return json({ error: "RevenueCat event has an invalid expiration" }, 400);
+    }
+    const { error } = await admin.rpc("apply_revenuecat_entitlement", {
+      p_user_id: userId,
+      p_subscription_id: externalId,
+      p_product_id: typeof event.product_id === "string" ? event.product_id : null,
+      p_status: status,
+      p_period_end: expiryTimestamp == null ? null : new Date(expiryTimestamp).toISOString(),
+      p_event_id: eventId,
+      p_status_updated_at: new Date(eventTimestamp).toISOString(),
+    });
     if (error) {
       console.error("RevenueCat entitlement update failed", error);
       return json({ error: "Could not update subscription status" }, 500);
