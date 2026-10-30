@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#4f46e5">
+  <title>Ledgerly account confirmation</title>
+  <style>
+    :root{color-scheme:light;font-family:Inter,ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;color:#101828;background:#f5f6fb}
+    *{box-sizing:border-box}body{margin:0;min-height:100vh;display:grid;place-items:center;padding:24px}
+    main{width:min(100%,520px);background:#fff;border:1px solid #e7e9f1;border-radius:24px;padding:clamp(28px,6vw,48px);box-shadow:0 18px 55px #18204b12}
+    .brand{font-weight:850;letter-spacing:.14em;color:#4f46e5;font-size:15px}
+    .mark{width:56px;height:56px;border-radius:18px;background:#eef2ff;color:#4f46e5;display:grid;place-items:center;font-size:28px;margin:34px 0 22px}
+    h1{font-size:clamp(26px,5vw,34px);letter-spacing:-.04em;margin:0 0 12px}
+    p{color:#667085;line-height:1.65;margin:0 0 18px}
+    .button{display:inline-flex;align-items:center;justify-content:center;background:#4f46e5;color:#fff;text-decoration:none;font-weight:700;border-radius:12px;padding:14px 20px;margin-top:8px}
+    .hint{font-size:13px;margin-top:24px;border-top:1px solid #eaecf0;padding-top:18px}
+    .error{color:#b42318}.hidden{display:none}
+  </style>
+</head>
+<body>
+<main>
+  <div class="brand">LEDGERLY</div>
+  <div class="mark" id="mark" aria-hidden="true">✓</div>
+  <h1 id="title">Checking your confirmation…</h1>
+  <p id="message">Please keep this page open while we check the confirmation result.</p>
+  <a class="button hidden" id="return" href="https://ledgerly-invoice-app.vercel.app/">Return to Ledgerly</a>
+  <p class="hint">If you did not create a Ledgerly account, you can ignore the confirmation email. For your security, never share email links, passwords or payment credentials.</p>
+</main>
+<script>
+(function(){
+  const params=new URLSearchParams(location.search);
+  const hash=new URLSearchParams(location.hash.replace(/^#/,""));
+  const error=params.get("error_description")||params.get("error")||hash.get("error_description")||hash.get("error");
+  const code=params.get("code");
+  const tokenHash=params.get("token_hash")||params.get("token");
+  const type=params.get("type");
+  const title=document.getElementById("title");
+  const message=document.getElementById("message");
+  const mark=document.getElementById("mark");
+  const link=document.getElementById("return");
+  if(error){
+    title.textContent="Confirmation link could not be completed";
+    message.textContent=decodeURIComponent(error.replace(/\+/g," "));
+    mark.textContent="!";
+    mark.style.background="#fef3f2";mark.style.color="#b42318";
+    message.className="error";
+  }else if(code||tokenHash||hash.get("access_token")){
+    title.textContent="Your confirmation link was received";
+    message.textContent="Supabase has returned you to Ledgerly. Your email confirmation is processed by Supabase before this page opens. You can now return to Ledgerly and sign in. If sign-in says your email is not confirmed, request a new confirmation email.";
+    link.classList.remove("hidden");
+  }else{
+    title.textContent="Ledgerly account help";
+    message.textContent="This page is the secure return address for Ledgerly account emails. Open the confirmation link from the latest email to verify your address.";
+    mark.textContent="✉";
+  }
+})();
+</script>
+</body>
+</html>
