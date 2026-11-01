@@ -117,7 +117,6 @@ p {
   <h1 id="title">Verifying confirmation link...</h1>
   <p id="message">Please wait while we check your verification link status with Supabase.</p>
   <div id="details" class="state-box" style="display:none;"></div>
-  <a class="button" id="action-btn" href="#">Open Ledgerly</a>
   <p class="hint">Ledgerly Security: Never share confirmation links, passwords, or security credentials.</p>
 </main>
 <script>
@@ -136,7 +135,6 @@ p {
   const mark = document.getElementById("mark");
   const card = document.getElementById("card");
   const details = document.getElementById("details");
-  const btn = document.getElementById("action-btn");
 
   const lowerError = (rawError + " " + errorCode).toLowerCase();
 
@@ -173,10 +171,10 @@ p {
     // 4. Confirmation Redirected / Processing / Success State
     card.classList.add("success");
     mark.textContent = "✓";
-    title.textContent = "Email confirmation processed";
-    message.textContent = "Supabase has processed your confirmation link and returned you safely to Ledgerly.";
+    title.textContent = "Email link accepted";
+    message.textContent = "Supabase returned a confirmation response. This page does not sign you in to Ledgerly or create an app session.";
     details.style.display = "block";
-    details.textContent = "You can now return to the Ledgerly application on your device and sign in.";
+    details.textContent = "Return to Ledgerly and sign in with the email address and password you used to create your account. If sign-in fails, request a fresh confirmation email.";
   } else {
     // 5. Direct Visit / Waiting State
     mark.textContent = "✉";
