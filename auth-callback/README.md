@@ -17,11 +17,11 @@ The Vercel project must be deployed before its URL is added to Supabase. The fre
 
 ## Important limitations
 
-This is a confirmation-return page, not a replacement for Supabase Auth and not a native mobile deep-link handler. It does not create accounts, verify passwords, or independently validate confirmation tokens. It only presents the return/error state sent by Supabase.
+This is an informational confirmation-return page, not a replacement for Supabase Auth and not a native mobile deep-link handler. It does not exchange the returned authorization code, establish a Ledgerly session, create accounts, verify passwords, or independently validate confirmation tokens. After a successful confirmation redirect, the user must return to Ledgerly and sign in. The page only presents the return/error state sent by Supabase.
 
 The repository currently contains Flutter web and Windows host folders, but no Android or iOS host projects and no registered Ledgerly app URI scheme. Native app handoff requires native platform configuration and end-to-end testing.
 
-A separate callback hostname cannot share browser PKCE storage with the Flutter web app. If the web app uses PKCE, use a same-origin callback or implement and test a server-side / same-origin confirmation flow before enabling the separate hostname.
+A separate callback hostname cannot share browser PKCE storage with the Flutter web app. The Flutter web signup currently defaults its redirect to the app's own origin, which keeps the PKCE verifier available to the app. Do not override that with this separate Vercel hostname for web signups. Keep this static page for informational/manual sign-in flows only; it does not complete the PKCE code exchange. If you want a separate hostname to handle web signups, implement and end-to-end test a supported same-origin or server-side flow first.
 
 ## Verification checklist
 
