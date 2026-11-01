@@ -4,9 +4,9 @@ Static HTTPS return page for Ledgerly account confirmation links.
 
 ## Vercel deployment
 
-Create a Vercel project from this repository and set its **Root Directory** to `auth-callback`. It is a static HTML site; no framework, install command, or build command is required.
+This is a static HTML site. The Ledgerly Vercel project is configured with **Root Directory** `auth-callback`; no framework, install command, or build command is required. Open the deployed project domain at `/` (not `/auth-callback`).
 
-The Vercel project must be deployed before its URL is added to Supabase. The free Vercel Hobby plan can host this static page on a `.vercel.app` hostname.
+The preview deployment may require Vercel team authentication. The verified project domain is the public return-page address after the callback branch is merged and the production deployment completes. The free Vercel Hobby plan can host this static page on a `.vercel.app` hostname.
 
 ## Supabase configuration — do not change production URLs blindly
 
@@ -17,7 +17,7 @@ The Vercel project must be deployed before its URL is added to Supabase. The fre
 
 ## Important limitations
 
-This is an informational confirmation-return page, not a replacement for Supabase Auth and not a native mobile deep-link handler. It does not exchange the returned authorization code, establish a Ledgerly session, create accounts, verify passwords, or independently validate confirmation tokens. After a successful confirmation redirect, the user must return to Ledgerly and sign in. The page only presents the return/error state sent by Supabase.
+This page supports the informational email-confirmation return only. It is not a password-recovery handler, a replacement for Supabase Auth, or a native mobile deep-link handler. It does not exchange the returned authorization code, establish a Ledgerly session, create accounts, verify passwords, or independently validate confirmation tokens. After a successful confirmation redirect, the user must return to Ledgerly and sign in. Password-reset emails must redirect to the Flutter app's own origin and use the app's password-reset flow; do not route recovery links to this static page. The page only presents the return/error state sent by Supabase.
 
 The repository currently contains Flutter web and Windows host folders, but no Android or iOS host projects and no registered Ledgerly app URI scheme. Native app handoff requires native platform configuration and end-to-end testing.
 
