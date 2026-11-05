@@ -67,6 +67,17 @@ class _PaywallScreenState extends State<PaywallScreen> {
         .replaceFirst('StateError: ', '');
   }
 
+  Future<void> _signInWithGoogle() async {
+    try {
+      await Supabase.instance.client.auth.signInWithOAuth(
+        OAuthProvider.google,
+        redirectTo: kIsWeb ? null : 'io.supabase.ledgerly://login-callback',
+      );
+    } catch (e) {
+      if (mounted) setState(() => _message = 'Google sign-in error: $e');
+    }
+  }
+
   Future<void> _showAccountDialog() async {
     if (!_service.isBackendReady) {
       setState(() => _message =
@@ -92,6 +103,26 @@ class _PaywallScreenState extends State<PaywallScreen> {
               children: [
                 const Text(
                     'Your account securely links purchases across supported devices.'),
+                const SizedBox(height: 16),
+                OutlinedButton.icon(
+                  onPressed: submitting ? null : () async {
+                    Navigator.pop(dialogContext);
+                    await _signInWithGoogle();
+                  },
+                  icon: const Icon(Icons.g_mobiledata, size: 28, color: Color(0xFF4285F4)),
+                  label: const Text('Continue with Google'),
+                  style: OutlinedButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                const Row(
+                  children: [
+                    Expanded(child: Divider()),
+                    Padding(padding: EdgeInsets.symmetric(horizontal: 8), child: Text('OR', style: TextStyle(color: Colors.grey, fontSize: 12))),
+                    Expanded(child: Divider()),
+                  ],
+                ),
                 const SizedBox(height: 12),
                 TextField(
                   controller: email,
