@@ -1,11 +1,11 @@
-#!/usr/bin/env bash
-set -euo pipefail
+#!/bin/sh
+set -eu
 
 # Keep the Vercel build reproducible and aligned with the project's Flutter toolchain.
 FLUTTER_VERSION="3.47.2"
 FLUTTER_DIR="${TMPDIR:-/tmp}/flutter-sdk-${FLUTTER_VERSION}"
 
-if [[ ! -x "${FLUTTER_DIR}/bin/flutter" ]]; then
+if [ ! -x "${FLUTTER_DIR}/bin/flutter" ]; then
   git clone --depth 1 --branch "${FLUTTER_VERSION}" https://github.com/flutter/flutter.git "${FLUTTER_DIR}"
 fi
 
