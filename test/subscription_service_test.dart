@@ -43,4 +43,38 @@ void main() {
     await expectLater(sub.cancelSubscription(), throwsUnsupportedError);
     expect(sub.isPro, isFalse);
   });
+
+  test('Backend error codes map to customer-safe messages', () {
+    expect(subscriptionErrorMessage('billing_not_configured'),
+        contains('not available yet'));
+    expect(subscriptionErrorMessage('already_subscribed'),
+        contains('already has an active Ledgerly Pro'));
+    expect(subscriptionErrorMessage('payment_issue'),
+        contains('unpaid balance'));
+    expect(subscriptionErrorMessage('account_mismatch'),
+        contains('different Ledgerly account'));
+    expect(subscriptionErrorMessage('provider_unavailable'),
+        contains('temporarily unavailable'));
+    expect(subscriptionErrorMessage('checkout_failed'),
+        contains('No payment has been taken'));
+    expect(subscriptionErrorMessage('something_unexpected'),
+        contains('could not confirm'));
+  });
+
+  test('Subscription errors are safe to display verbatim', () {
+    const error =
+        SubscriptionException('Sign in to continue.', code: 'sign_in_required');
+    expect(error.toString(), 'Sign in to continue.');
+    expect(error.toString().contains('Exception'), isFalse);
+  });
+
+  test('A build without a configured backend reports a friendly error',
+      () async {
+    final sub = SubscriptionService.instance;
+    await expectLater(
+      sub.launchPayPalSubscription(),
+      throwsA(isA<SubscriptionException>()),
+    );
+    expect(sub.isPro, isFalse);
+  });
 }

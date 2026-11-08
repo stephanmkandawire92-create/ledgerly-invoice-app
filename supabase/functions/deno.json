@@ -1,0 +1,11 @@
+{
+  // Pinned https imports are intentional: Supabase's Edge Runtime resolves them
+  // without an import map, so the same files run in production and in tests.
+  "lint": {
+    "exclude": ["tests"],
+    "rules": { "exclude": ["no-import-prefix"] }
+  },
+  "fmt": {
+    "exclude": ["tests"]
+  }
+}

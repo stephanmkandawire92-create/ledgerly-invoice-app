@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
+import '../services/entitlement_evaluator.dart';
 import '../services/subscription_service.dart';
 
 class PaywallScreen extends StatefulWidget {
@@ -26,7 +27,30 @@ class PaywallScreen extends StatefulWidget {
 class _PaywallScreenState extends State<PaywallScreen> {
   final SubscriptionService _service = SubscriptionService.instance;
   bool _busy = false;
+  bool _checking = false;
   String? _message;
+
+  @override
+  void initState() {
+    super.initState();
+    // On Flutter web, PayPal returns the customer to PAYPAL_RETURN_URL or
+    // PAYPAL_CANCEL_URL in this same tab. Recognise that landing, then ask the
+    // backend to confirm the payment instead of assuming success.
+    if (kIsWeb) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        final signal = describePayPalReturn(Uri.base);
+        if (signal == PayPalReturnSignal.approved) {
+          setState(() => _message =
+              'Welcome back. PayPal has returned you to Ledgerly; we are confirming your payment with our server now.');
+          _verifyAfterReturn();
+        } else if (signal == PayPalReturnSignal.cancelled) {
+          setState(() => _message =
+              'PayPal checkout was cancelled. No payment has been taken and your account is unchanged.');
+        }
+      });
+    }
+  }
 
   bool get _isMobile =>
       !kIsWeb &&
@@ -43,8 +67,10 @@ class _PaywallScreenState extends State<PaywallScreen> {
     try {
       await action();
       if (mounted) {
-        setState(() => _message ??=
-            'Request completed. Ledgerly Pro appears after the subscription is verified.');
+        setState(() => _message ??= _service.isPro
+            ? 'Your Ledgerly Pro subscription is verified and active.'
+            : 'No verified Ledgerly Pro subscription was found yet. '
+                'If you have just paid, wait a moment and check the payment status again.');
       }
       if (mounted && _service.isPro) Navigator.pop(context, true);
     } catch (error) {
@@ -55,16 +81,13 @@ class _PaywallScreenState extends State<PaywallScreen> {
   }
 
   String _friendlyError(Object error) {
-    final text = error.toString();
-    if (text.contains('not configured') || text.contains('not initialized')) {
-      return 'Payments are not configured yet. Ledgerly remains in Free mode until the backend and provider credentials are set up.';
+    if (error is SubscriptionException) return error.message;
+    if (error is StateError) {
+      return error.message;
     }
-    if (text.contains('Sign in')) {
-      return 'Sign in or create a Ledgerly account before subscribing.';
-    }
-    return text
-        .replaceFirst('Exception: ', '')
-        .replaceFirst('StateError: ', '');
+    // Never surface provider or platform internals to a customer.
+    return 'Something went wrong while contacting PayPal. No payment has been taken. '
+        'Check your connection and try again.';
   }
 
   Future<void> _signInWithGoogle() async {
@@ -251,9 +274,60 @@ class _PaywallScreenState extends State<PaywallScreen> {
         }
         if (mounted) {
           setState(() => _message =
-              'PayPal checkout opened. Pro will unlock only after the verified payment webhook updates your account. Return here and refresh after payment.');
+              'PayPal checkout opened in a new window. Complete the payment there, then return to this screen and tap "Check payment status". '
+              'Ledgerly Pro unlocks only after our server verifies the payment with PayPal.');
         }
       });
+
+  /// Asks Supabase to reconcile the checkout with PayPal and reports the
+  /// server's verdict. Never assumes success from the browser redirect.
+  Future<void> _checkPaymentStatus({bool silent = false}) async {
+    if (_checking) return;
+    if (!_service.isSignedIn) {
+      setState(() => _message =
+          'Sign in to your Ledgerly account to check your subscription.');
+      return;
+    }
+    setState(() {
+      _checking = true;
+      if (!silent) _message = null;
+    });
+    try {
+      final active = await _service.awaitVerifiedSubscription();
+      if (!mounted) return;
+      if (active) {
+        setState(() => _message =
+            'Payment verified. Ledgerly Pro is now active on your account.');
+        Navigator.pop(context, true);
+        return;
+      }
+      final status = _service.status;
+      setState(() {
+        if (status == 'past_due') {
+          _message =
+              'PayPal reported a failed payment for this subscription. Update your payment method in PayPal, then check again.';
+        } else if (status == 'suspended' || status == 'expired') {
+          _message =
+              'This subscription is no longer active. You can start a new subscription when you are ready.';
+        } else if (status == 'cancelled') {
+          _message =
+              'This subscription is cancelled. You keep Pro until the paid-through date shown by PayPal.';
+        } else if (status == 'pending' || _service.hasPendingApproval) {
+          _message =
+              'PayPal has not confirmed the payment yet. This usually takes a few seconds; check again shortly. You have not been charged twice.';
+        } else {
+          _message =
+              'No active Ledgerly Pro subscription is linked to this account yet. If you just completed checkout, wait a moment and check again.';
+        }
+      });
+    } on SubscriptionException catch (error) {
+      if (mounted) setState(() => _message = error.message);
+    } finally {
+      if (mounted) setState(() => _checking = false);
+    }
+  }
+
+  Future<void> _verifyAfterReturn() => _checkPaymentStatus(silent: true);
 
   Future<void> _restore() => _run(() async {
         await _service.restoreMobilePurchases();
@@ -390,10 +464,10 @@ class _PaywallScreenState extends State<PaywallScreen> {
                             child: const Text('Restore purchases',
                                 style: TextStyle(color: Color(0xFFCBD5E1)))),
                       TextButton(
-                        onPressed: _busy
+                        onPressed: (_busy || _checking)
                             ? null
-                            : () => _run(_service.refreshEntitlement),
-                        child: const Text('Refresh payment status',
+                            : _checkPaymentStatus,
+                        child: const Text('Check payment status',
                             style: TextStyle(color: Color(0xFFCBD5E1))),
                       ),
                       if (!_isMobile && !_isWebOrWindows)
@@ -408,11 +482,51 @@ class _PaywallScreenState extends State<PaywallScreen> {
                             : 'Sign in / Create account'),
                       ),
                     ],
-                    if (_busy)
-                      const Padding(
-                        padding: EdgeInsets.all(12),
-                        child: Center(child: CircularProgressIndicator()),
+                    if (_busy || _checking)
+                      Padding(
+                        padding: const EdgeInsets.all(12),
+                        child: Center(
+                          child: Column(
+                            children: [
+                              const CircularProgressIndicator(),
+                              if (_checking) ...[
+                                const SizedBox(height: 8),
+                                const Text(
+                                  'Checking with PayPal…',
+                                  style: TextStyle(color: Color(0xFFCBD5E1)),
+                                ),
+                              ],
+                            ],
+                          ),
+                        ),
                       ),
+                    if (!pro && _service.hasPendingApproval && !_checking) ...[
+                      const SizedBox(height: 12),
+                      Container(
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                            color: const Color(0xFF164E63),
+                            borderRadius: BorderRadius.circular(10),
+                            border: Border.all(color: const Color(0xFF0E7490))),
+                        child: Row(
+                          children: [
+                            const Icon(Icons.hourglass_top,
+                                color: Color(0xFF67E8F9), size: 20),
+                            const SizedBox(width: 10),
+                            const Expanded(
+                              child: Text(
+                                'Payment verification pending. Ledgerly Pro is not active yet.',
+                                style: TextStyle(color: Color(0xFFE0F2FE)),
+                              ),
+                            ),
+                            TextButton(
+                              onPressed: _checkPaymentStatus,
+                              child: const Text('Check'),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
                     if (_message != null) ...[
                       const SizedBox(height: 12),
                       Container(
