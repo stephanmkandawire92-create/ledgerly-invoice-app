@@ -1,6 +1,7 @@
 #!/bin/sh
 set -eu
 
+# Build from the repository root (Vercel Root Directory must be empty/root).
 # Keep the Vercel build reproducible and aligned with the project's Flutter toolchain.
 FLUTTER_VERSION="3.47.2"
 FLUTTER_DIR="${TMPDIR:-/tmp}/flutter-sdk-${FLUTTER_VERSION}"
