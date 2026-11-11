@@ -1113,6 +1113,37 @@ class _HomeScreenState extends State<HomeScreen> {
                 ],
               ),
               const SizedBox(height: 24),
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(14),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFEEF2FF),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: const Color(0xFFC7D2FE)),
+                ),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Icon(Icons.phone_android_outlined,
+                        color: Color(0xFF4338CA), size: 20),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Semantics(
+                        label: AppTranslations.get('localStorageNotice', _lang),
+                        child: Text(
+                          AppTranslations.get('localStorageNotice', _lang),
+                          style: const TextStyle(
+                            color: Color(0xFF312E81),
+                            fontSize: 13,
+                            height: 1.4,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 20),
               LayoutBuilder(
                 builder: (context, constraints) {
                   final columns = constraints.maxWidth > 800
