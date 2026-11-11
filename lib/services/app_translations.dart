@@ -59,6 +59,7 @@ class AppTranslations {
       'statusAccepted': 'Accepted',
       'statusDeclined': 'Declined',
       'statusVoid': 'Void',
+      'localStorageNotice': 'Workspace data is stored on this device only. Cloud sync is not available in this release. Export backups regularly.',
     },
     'es': {
       'overview': 'General',
@@ -119,6 +120,7 @@ class AppTranslations {
       'statusAccepted': 'Aceptado',
       'statusDeclined': 'Rechazado',
       'statusVoid': 'Anulado',
+      'localStorageNotice': 'Los datos se guardan solo en este dispositivo. La sincronización en la nube no está disponible en esta versión. Exporta copias de seguridad con regularidad.',
     },
     'fr': {
       'overview': 'Aperçu',
@@ -179,6 +181,7 @@ class AppTranslations {
       'statusAccepted': 'Accepté',
       'statusDeclined': 'Refusé',
       'statusVoid': 'Annulé',
+      'localStorageNotice': 'Les données sont stockées uniquement sur cet appareil. La synchronisation cloud n’est pas disponible dans cette version. Exportez régulièrement des sauvegardes.',
     },
     'de': {
       'overview': 'Übersicht',
@@ -239,6 +242,7 @@ class AppTranslations {
       'statusAccepted': 'Angenommen',
       'statusDeclined': 'Abgelehnt',
       'statusVoid': 'Storniert',
+      'localStorageNotice': 'Arbeitsbereichsdaten werden nur auf diesem Gerät gespeichert. Cloud-Synchronisierung ist in dieser Version nicht verfügbar. Exportieren Sie regelmäßig Sicherungen.',
     },
     'pt': {
       'overview': 'Visão geral',
@@ -299,6 +303,7 @@ class AppTranslations {
       'statusAccepted': 'Aceito',
       'statusDeclined': 'Recusado',
       'statusVoid': 'Anulado',
+      'localStorageNotice': 'Os dados são armazenados apenas neste dispositivo. A sincronização na nuvem não está disponível nesta versão. Exporte cópias de segurança regularmente.',
     },
     'ar': {
       'overview': 'نظرة عامة',
@@ -359,6 +364,7 @@ class AppTranslations {
       'statusAccepted': 'مقبول',
       'statusDeclined': 'مرفوض',
       'statusVoid': 'ملغى',
+      'localStorageNotice': 'تُخزَّن بيانات مساحة العمل على هذا الجهاز فقط. المزامنة السحابية غير متاحة في هذا الإصدار. صدّر نسخًا احتياطية بانتظام.',
     },
     'zh': {
       'overview': '概览',
@@ -419,6 +425,7 @@ class AppTranslations {
       'statusAccepted': '已接受',
       'statusDeclined': '已拒绝',
       'statusVoid': '已废弃',
+      'localStorageNotice': '工作区数据仅存储在此设备上。此版本不提供云同步。请定期导出备份。',
     },
   };
 
