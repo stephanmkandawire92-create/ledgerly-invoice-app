@@ -147,7 +147,7 @@ class DocumentStore {
     if (!CurrencyHelper.currencies.any(
         (currency) => currency.code == profile.currencyCode.toUpperCase())) {
       throw FormatException(
-          'Unsupported business profile currency: ' + profile.currencyCode + '.');
+          'Unsupported business profile currency: ${profile.currencyCode}.');
     }
     await _saveValue(_profileKey, 'profile', profile.encode());
   }
@@ -379,14 +379,14 @@ class DocumentStore {
     final numbers = <String>{};
     for (final document in documents) {
       final number = document.number.trim().toLowerCase();
-      final numberKey = document.kind.name + ':' + number;
+      final numberKey = '${document.kind.name}:$number';
       if (number.isEmpty || !numbers.add(numberKey)) {
         throw const FormatException(
             'Documents must have unique, non-empty numbers within each type.');
       }
       if (!CurrencyHelper.currencies.any(
           (currency) => currency.code == document.currencyCode.toUpperCase())) {
-        throw FormatException('Unsupported document currency: ' + document.currencyCode + '.');
+        throw FormatException('Unsupported document currency: ${document.currencyCode}.');
       }
       if (!document.taxPercent.isFinite ||
           document.taxPercent < 0 ||
