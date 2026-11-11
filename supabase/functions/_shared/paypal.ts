@@ -372,6 +372,9 @@ export function paymentEvidence(
   const lastFailed = subscription.billing_info?.last_failed_payment;
   const lastPaymentTime = parseTime(lastPayment?.time);
   if (!lastPayment) return { paid: false, lastPaymentAt: null, reason: "no recorded payment" };
+  if (lastPaymentTime === null) {
+    return { paid: false, lastPaymentAt: null, reason: "last payment has no valid provider timestamp" };
+  }
   if (!moneyMatches(lastPayment.amount, expected)) {
     return { paid: false, lastPaymentAt: lastPayment?.time ?? null, reason: "last payment amount does not match the plan price" };
   }
@@ -508,9 +511,14 @@ export function decideEntitlement(input: EntitlementInput): EntitlementDecision 
       if (!input.saleAmount) {
         return { action: "ignore", reason: "payment event has no amount to verify" };
       }
+      const paymentPeriodEnd = activePeriodEnd(subscription) ??
+        (eventTime === null ? null : addOneMonth(new Date(eventTime)).toISOString());
+      if (canonical === "active" && paymentPeriodEnd === null) {
+        return { action: "ignore", reason: "payment event has no usable paid-through date" };
+      }
       return apply(
         canonical === "active" ? "active" : canonical,
-        canonical === "active" ? activePeriodEnd(subscription) : paidThrough,
+        canonical === "active" ? paymentPeriodEnd : paidThrough,
         canonical === "active" ? "verified payment completed" : `payment completed for ${canonical} subscription`,
       );
     }

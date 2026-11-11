@@ -6,7 +6,6 @@ import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
 import 'package:share_plus/share_plus.dart';
-import 'package:uuid/uuid.dart';
 
 import '../models/business_document.dart';
 import '../models/business_profile.dart';
@@ -18,16 +17,16 @@ import '../services/app_translations.dart';
 import '../services/document_store.dart';
 import 'analytics_screen.dart';
 import 'business_profile_screen.dart';
+import 'document_editor_screen.dart';
 import 'customers_screen.dart';
 import 'items_screen.dart';
 import 'payments_screen.dart';
 import '../services/subscription_service.dart';
+import '../widgets/dashboard_components.dart';
 import 'paywall_screen.dart';
 
 const _brand = Color(0xFF4F46E5);
 const _ink = Color(0xFF172033);
-const _muted = Color(0xFF7B8497);
-const _line = Color(0xFFE9ECF3);
 
 String dateLabel(DateTime date) => DateFormat('d MMM yyyy').format(date);
 
@@ -264,9 +263,27 @@ class _HomeScreenState extends State<HomeScreen> {
   Future<Uint8List> _makePdf(BusinessDocument doc) async {
     final pdf = pw.Document();
     final currency = doc.currencyCode;
-    final docPayments = _payments.where((p) => p.invoiceId == doc.id).toList();
-    final totalPaid = docPayments.fold(0.0, (sum, p) => sum + p.amount);
-    final remaining = (doc.total - totalPaid).clamp(0.0, double.infinity);
+    final docPayments = _payments
+        .where((payment) => payment.invoiceId == doc.id)
+        .toList()
+      ..sort((a, b) => b.paymentDate.compareTo(a.paymentDate));
+    if (doc.kind != DocumentKind.invoice && docPayments.isNotEmpty) {
+      throw const FormatException('Quotes cannot contain recorded invoice payments.');
+    }
+    if (docPayments.any((payment) =>
+        !payment.amount.isFinite ||
+        payment.amount <= 0 ||
+        roundMoney(payment.amount) != payment.amount)) {
+      throw const FormatException('This document has invalid payment records.');
+    }
+    final totalPaid =
+        roundMoney(docPayments.fold(0.0, (sum, payment) => sum + payment.amount));
+    if (totalPaid > doc.total + 0.004) {
+      throw const FormatException(
+          'Recorded payments exceed this invoice total. Correct the payment records before creating a PDF.');
+    }
+    final remaining =
+        (doc.total - totalPaid).clamp(0.0, double.infinity).toDouble();
 
     // Find matching customer details
     Customer? matchedCustomer;
@@ -479,10 +496,10 @@ class _HomeScreenState extends State<HomeScreen> {
             children: [
               _navyTotalRow(
                   'Subtotal', CurrencyHelper.format(doc.subtotal, currency)),
-              if (doc.discount > 0)
+              if (doc.safeDiscount > 0)
                 _navyTotalRow('Discount',
-                    '-${CurrencyHelper.format(doc.discount, currency)}'),
-              _navyTotalRow('Sales Tax (${doc.taxPercent.toStringAsFixed(1)}%)',
+                    '-${CurrencyHelper.format(doc.safeDiscount, currency)}'),
+              _navyTotalRow('Sales Tax (${doc.safeTaxPercent.toStringAsFixed(1)}%)',
                   CurrencyHelper.format(doc.taxAmount, currency)),
               pw.Divider(color: PdfColors.grey600, height: 10),
               _navyTotalRow('Total Amount Due',
@@ -854,7 +871,7 @@ class _HomeScreenState extends State<HomeScreen> {
         child: Row(
           children: [
             if (wide)
-              _SideNavigation(
+              LedgerlySideNavigation(
                 section: _section,
                 langCode: _lang,
                 documentCount: _documents.length,
@@ -866,7 +883,7 @@ class _HomeScreenState extends State<HomeScreen> {
             Expanded(
               child: Column(
                 children: [
-                  _TopBar(
+                  LedgerlyTopBar(
                     wide: wide,
                     searchController: _searchController,
                     langCode: _lang,
@@ -1095,6 +1112,37 @@ class _HomeScreenState extends State<HomeScreen> {
                 ],
               ),
               const SizedBox(height: 24),
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(14),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFEEF2FF),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: const Color(0xFFC7D2FE)),
+                ),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Icon(Icons.phone_android_outlined,
+                        color: Color(0xFF4338CA), size: 20),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Semantics(
+                        label: AppTranslations.get('localStorageNotice', _lang),
+                        child: Text(
+                          AppTranslations.get('localStorageNotice', _lang),
+                          style: const TextStyle(
+                            color: Color(0xFF312E81),
+                            fontSize: 13,
+                            height: 1.4,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 20),
               LayoutBuilder(
                 builder: (context, constraints) {
                   final columns = constraints.maxWidth > 800
@@ -1114,28 +1162,28 @@ class _HomeScreenState extends State<HomeScreen> {
                             ? 2.0
                             : 1.55,
                     children: [
-                      _MetricCard(
+                      LedgerlyMetricCard(
                           title: AppTranslations.get('paidInvoices', _lang),
                           value: CurrencyHelper.format(
                               _paidTotal, _profile.currencyCode),
                           icon: Icons.check_circle_outline,
                           color: const Color(0xFF0E9F6E),
                           caption: 'Marked as paid'),
-                      _MetricCard(
+                      LedgerlyMetricCard(
                           title: AppTranslations.get('outstanding', _lang),
                           value: CurrencyHelper.format(
                               _outstandingTotal, _profile.currencyCode),
                           icon: Icons.account_balance_wallet_outlined,
                           color: const Color(0xFFB54708),
                           caption: 'Invoices not yet paid'),
-                      _MetricCard(
+                      LedgerlyMetricCard(
                           title: AppTranslations.get('openQuotes', _lang),
                           value: CurrencyHelper.format(
                               _quoteTotal, _profile.currencyCode),
                           icon: Icons.request_quote_outlined,
                           color: _brand,
                           caption: 'Awaiting a decision'),
-                      _MetricCard(
+                      LedgerlyMetricCard(
                           title: AppTranslations.get('savedClients', _lang),
                           value: _customers.length.toString(),
                           icon: Icons.people_outline,
@@ -1165,7 +1213,7 @@ class _HomeScreenState extends State<HomeScreen> {
               ),
               const SizedBox(height: 12),
               if (recent.isEmpty)
-                _EmptyState(
+                LedgerlyEmptyState(
                   icon: Icons.description_outlined,
                   title: AppTranslations.get('workspaceReady', _lang),
                   message: AppTranslations.get('workspaceMessage', _lang),
@@ -1179,7 +1227,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   child: Column(
                     children: recent
                         .take(5)
-                        .map((doc) => _DocumentRow(
+                        .map((doc) => LedgerlyDocumentRow(
                               document: doc,
                               displayStatus:
                                   effectiveInvoiceStatus(doc, _payments),
@@ -1276,7 +1324,7 @@ class _HomeScreenState extends State<HomeScreen> {
               ),
               const SizedBox(height: 14),
               if (docs.isEmpty)
-                _EmptyState(
+                LedgerlyEmptyState(
                   icon: _section == 'Quotes'
                       ? Icons.request_quote_outlined
                       : Icons.receipt_long_outlined,
@@ -1304,7 +1352,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   child: Column(
                     children: docs
                         .map(
-                          (doc) => _DocumentRow(
+                          (doc) => LedgerlyDocumentRow(
                             document: doc,
                             displayStatus:
                                 effectiveInvoiceStatus(doc, _payments),
@@ -1326,1400 +1374,3 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 }
 
-class _TopBar extends StatelessWidget {
-  const _TopBar({
-    required this.wide,
-    required this.searchController,
-    required this.langCode,
-    required this.onNewInvoice,
-    required this.onNewQuote,
-    required this.onMenu,
-  });
-
-  final bool wide;
-  final TextEditingController searchController;
-  final String langCode;
-  final VoidCallback onNewInvoice;
-  final VoidCallback onNewQuote;
-  final VoidCallback onMenu;
-
-  @override
-  Widget build(BuildContext context) => Container(
-        padding: EdgeInsets.symmetric(horizontal: wide ? 34 : 18, vertical: 16),
-        decoration: const BoxDecoration(
-            border: Border(bottom: BorderSide(color: _line))),
-        child: Row(
-          children: [
-            if (!wide)
-              IconButton(
-                  onPressed: onMenu, icon: const Icon(Icons.menu_rounded)),
-            Container(
-              width: 38,
-              height: 38,
-              decoration: BoxDecoration(
-                  color: _brand, borderRadius: BorderRadius.circular(12)),
-              child: const Icon(Icons.account_balance_wallet_rounded,
-                  color: Colors.white, size: 21),
-            ),
-            const SizedBox(width: 10),
-            const Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text('Ledgerly',
-                    style: TextStyle(
-                        fontWeight: FontWeight.w800,
-                        fontSize: 19,
-                        color: _ink,
-                        letterSpacing: -0.5)),
-                Text('GLOBAL INVOICING & ANALYTICS',
-                    style: TextStyle(
-                        fontSize: 8,
-                        letterSpacing: 1.1,
-                        color: _muted,
-                        fontWeight: FontWeight.w700)),
-              ],
-            ),
-            const Spacer(),
-            ListenableBuilder(
-              listenable: SubscriptionService.instance,
-              builder: (context, _) {
-                final isPro = SubscriptionService.instance.isPro;
-                return InkWell(
-                  onTap: () => PaywallScreen.showPaywall(context),
-                  borderRadius: BorderRadius.circular(20),
-                  child: Container(
-                    margin: const EdgeInsets.only(right: 12),
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-                    decoration: BoxDecoration(
-                      color: isPro
-                          ? const Color(0xFFFEF3C7)
-                          : const Color(0xFFEEF2FF),
-                      borderRadius: BorderRadius.circular(20),
-                      border: Border.all(
-                        color: isPro
-                            ? const Color(0xFFF59E0B)
-                            : const Color(0xFF6366F1),
-                      ),
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(
-                          Icons.workspace_premium_rounded,
-                          color: isPro
-                              ? const Color(0xFFD97706)
-                              : const Color(0xFF4F46E5),
-                          size: 16,
-                        ),
-                        const SizedBox(width: 4),
-                        Text(
-                          isPro ? 'PRO' : 'UPGRADE',
-                          style: TextStyle(
-                            fontSize: 11,
-                            fontWeight: FontWeight.w800,
-                            color: isPro
-                                ? const Color(0xFFB45309)
-                                : const Color(0xFF4F46E5),
-                            letterSpacing: 0.5,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                );
-              },
-            ),
-            if (wide)
-              SizedBox(
-                width: 260,
-                child: TextField(
-                  controller: searchController,
-                  decoration: InputDecoration(
-                    hintText: AppTranslations.get('searchDocuments', langCode),
-                    prefixIcon: const Icon(Icons.search, size: 19),
-                    isDense: true,
-                  ),
-                ),
-              ),
-            if (wide) const SizedBox(width: 12),
-            if (wide)
-              PopupMenuButton<String>(
-                tooltip: AppTranslations.get('create', langCode),
-                onSelected: (value) =>
-                    value == 'invoice' ? onNewInvoice() : onNewQuote(),
-                itemBuilder: (_) => [
-                  PopupMenuItem(
-                      value: 'invoice',
-                      child: Text(AppTranslations.get('newInvoice', langCode))),
-                  PopupMenuItem(
-                      value: 'quote',
-                      child: Text(AppTranslations.get('newQuote', langCode))),
-                ],
-                child: Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                  decoration: BoxDecoration(
-                      color: _brand, borderRadius: BorderRadius.circular(12)),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      const Icon(Icons.add, size: 18, color: Colors.white),
-                      const SizedBox(width: 7),
-                      Text(AppTranslations.get('create', langCode),
-                          style: const TextStyle(
-                              color: Colors.white,
-                              fontWeight: FontWeight.w700)),
-                    ],
-                  ),
-                ),
-              )
-            else
-              IconButton(
-                tooltip: AppTranslations.get('newInvoice', langCode),
-                onPressed: onNewInvoice,
-                icon: const Icon(Icons.add_circle, color: _brand, size: 28),
-              ),
-          ],
-        ),
-      );
-}
-
-class _SideNavigation extends StatelessWidget {
-  const _SideNavigation({
-    required this.section,
-    required this.langCode,
-    required this.documentCount,
-    required this.onSelect,
-  });
-
-  final String section;
-  final String langCode;
-  final int documentCount;
-  final ValueChanged<String> onSelect;
-
-  @override
-  Widget build(BuildContext context) => Container(
-        width: 245,
-        padding: const EdgeInsets.fromLTRB(14, 18, 14, 16),
-        decoration: const BoxDecoration(
-            color: Colors.white,
-            border: Border(right: BorderSide(color: _line))),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Padding(
-              padding: EdgeInsets.fromLTRB(12, 16, 12, 20),
-              child: Text('WORKSPACE',
-                  style: TextStyle(
-                      fontSize: 10,
-                      color: _muted,
-                      fontWeight: FontWeight.w800,
-                      letterSpacing: 1.4)),
-            ),
-            ...[
-              ('Overview', Icons.space_dashboard_outlined),
-              ('Invoices', Icons.receipt_long_outlined),
-              ('Quotes', Icons.request_quote_outlined),
-              ('Follow-ups', Icons.notifications_none),
-              ('Clients', Icons.people_outline),
-              ('Items', Icons.inventory_2_outlined),
-              ('Payments', Icons.payments_outlined),
-              ('Analytics', Icons.analytics_outlined),
-              ('Settings', Icons.settings_outlined),
-            ].map((item) {
-              final selected = section == item.$1;
-              final label = item.$1 == 'Analytics'
-                  ? 'Analytics'
-                  : item.$1 == 'Follow-ups'
-                      ? AppTranslations.get('followUps', langCode)
-                      : AppTranslations.get(item.$1.toLowerCase(), langCode);
-              return Padding(
-                padding: const EdgeInsets.only(bottom: 4),
-                child: ListTile(
-                  selected: selected,
-                  selectedTileColor: const Color(0xFFEEEDFF),
-                  selectedColor: _brand,
-                  shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(11)),
-                  leading: Icon(item.$2, size: 20),
-                  title: Text(label,
-                      style: TextStyle(
-                          fontSize: 13,
-                          fontWeight:
-                              selected ? FontWeight.w700 : FontWeight.w500)),
-                  onTap: () => onSelect(item.$1),
-                ),
-              );
-            }),
-            const Spacer(),
-            ListenableBuilder(
-              listenable: SubscriptionService.instance,
-              builder: (context, _) {
-                final isPro = SubscriptionService.instance.isPro;
-                final remaining = SubscriptionService.instance
-                    .remainingFreeDocuments(documentCount);
-                final used = documentCount > 5 ? 5 : documentCount;
-
-                return Container(
-                  width: double.infinity,
-                  padding: const EdgeInsets.all(14),
-                  decoration: BoxDecoration(
-                    color: isPro
-                        ? const Color(0xFFF0FDF4)
-                        : const Color(0xFFF7F7FF),
-                    border: Border.all(
-                      color: isPro
-                          ? const Color(0xFFBBF7D0)
-                          : const Color(0xFFE8E6FF),
-                    ),
-                    borderRadius: BorderRadius.circular(14),
-                  ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        children: [
-                          Icon(
-                            isPro
-                                ? Icons.workspace_premium_rounded
-                                : Icons.shield_outlined,
-                            color: isPro ? const Color(0xFF16A34A) : _brand,
-                            size: 20,
-                          ),
-                          const SizedBox(width: 8),
-                          Text(
-                            isPro ? 'Ledgerly Pro' : 'Free Plan',
-                            style: TextStyle(
-                              fontWeight: FontWeight.bold,
-                              color: isPro ? const Color(0xFF166534) : _ink,
-                              fontSize: 13,
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 8),
-                      if (isPro) ...[
-                        const Text(
-                          'Unlimited invoices & quotes, no watermark, PayPal subscribed.',
-                          style: TextStyle(
-                              fontSize: 11,
-                              color: Color(0xFF166534),
-                              height: 1.4),
-                        ),
-                      ] else ...[
-                        Text(
-                          '$used of 5 free documents used ($remaining left)',
-                          style: const TextStyle(fontSize: 11, color: _muted),
-                        ),
-                        const SizedBox(height: 6),
-                        ClipRRect(
-                          borderRadius: BorderRadius.circular(4),
-                          child: LinearProgressIndicator(
-                            value: (used / 5).clamp(0.0, 1.0),
-                            minHeight: 5,
-                            backgroundColor: const Color(0xFFE2E8F0),
-                            color: _brand,
-                          ),
-                        ),
-                        const SizedBox(height: 10),
-                        SizedBox(
-                          width: double.infinity,
-                          child: FilledButton(
-                            style: FilledButton.styleFrom(
-                              backgroundColor:
-                                  const Color(0xFFFFC439), // PayPal Gold
-                              foregroundColor: const Color(0xFF003087),
-                              padding: const EdgeInsets.symmetric(vertical: 8),
-                              shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(8)),
-                            ),
-                            onPressed: () => PaywallScreen.showPaywall(context),
-                            child: const Text('Upgrade Pro',
-                                style: TextStyle(
-                                    fontWeight: FontWeight.w800, fontSize: 12)),
-                          ),
-                        ),
-                      ],
-                    ],
-                  ),
-                );
-              },
-            ),
-          ],
-        ),
-      );
-}
-
-class _MetricCard extends StatelessWidget {
-  const _MetricCard(
-      {required this.title,
-      required this.value,
-      required this.icon,
-      required this.color,
-      required this.caption});
-
-  final String title;
-  final String value;
-  final IconData icon;
-  final Color color;
-  final String caption;
-
-  @override
-  Widget build(BuildContext context) => Card(
-        child: Padding(
-          padding: const EdgeInsets.all(18),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Row(
-                children: [
-                  Container(
-                      width: 34,
-                      height: 34,
-                      decoration: BoxDecoration(
-                          color: color.withValues(alpha: .1),
-                          borderRadius: BorderRadius.circular(10)),
-                      child: Icon(icon, color: color, size: 18)),
-                  const Spacer(),
-                  const Icon(Icons.more_horiz,
-                      color: Color(0xFFB0B7C5), size: 20),
-                ],
-              ),
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(value,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                          fontSize: 21,
-                          fontWeight: FontWeight.w800,
-                          color: _ink,
-                          letterSpacing: -.6)),
-                  const SizedBox(height: 3),
-                  Text(title,
-                      style: const TextStyle(
-                          fontSize: 12,
-                          fontWeight: FontWeight.w700,
-                          color: _ink)),
-                  Text(caption,
-                      style: const TextStyle(fontSize: 10, color: _muted)),
-                ],
-              ),
-            ],
-          ),
-        ),
-      );
-}
-
-class _DocumentRow extends StatelessWidget {
-  const _DocumentRow({
-    required this.document,
-    required this.onOpen,
-    required this.onPdf,
-    required this.onShare,
-    required this.onDelete,
-    this.displayStatus,
-  });
-
-  final BusinessDocument document;
-  final String? displayStatus;
-  final VoidCallback onOpen;
-  final VoidCallback onPdf;
-  final VoidCallback onShare;
-  final VoidCallback onDelete;
-
-  String get _status => displayStatus ?? document.status;
-
-  Color get _statusColor => switch (_status) {
-        'Paid' || 'Accepted' => const Color(0xFF027A48),
-        'Overdue' || 'Declined' => const Color(0xFFB42318),
-        'Sent' || 'Pending' => const Color(0xFFB54708),
-        _ => const Color(0xFF667085),
-      };
-
-  @override
-  Widget build(BuildContext context) => InkWell(
-        onTap: onOpen,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
-          child: Row(
-            children: [
-              Container(
-                  width: 40,
-                  height: 40,
-                  decoration: BoxDecoration(
-                      color: const Color(0xFFF0F2FF),
-                      borderRadius: BorderRadius.circular(11)),
-                  child: Icon(
-                      document.kind == DocumentKind.invoice
-                          ? Icons.receipt_long_outlined
-                          : Icons.request_quote_outlined,
-                      color: _brand)),
-              const SizedBox(width: 12),
-              Expanded(
-                flex: 3,
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                        document.clientName.isEmpty
-                            ? 'Unnamed client'
-                            : document.clientName,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                            fontWeight: FontWeight.w700, color: _ink)),
-                    const SizedBox(height: 4),
-                    Text(
-                        '${document.number} • ${dateLabel(document.issueDate)}',
-                        style: const TextStyle(fontSize: 11, color: _muted)),
-                  ],
-                ),
-              ),
-              if (MediaQuery.sizeOf(context).width > 620)
-                Expanded(
-                  child: Align(
-                    alignment: Alignment.centerLeft,
-                    child: _StatusPill(label: _status, color: _statusColor),
-                  ),
-                ),
-              Text(CurrencyHelper.format(document.total, document.currencyCode),
-                  style: const TextStyle(
-                      fontWeight: FontWeight.w800, color: _ink)),
-              IconButton(
-                tooltip: 'Share via WhatsApp, Email, etc.',
-                icon: const Icon(Icons.share_rounded, size: 20, color: _brand),
-                onPressed: onShare,
-              ),
-              PopupMenuButton<String>(
-                tooltip: 'Document actions',
-                onSelected: (value) {
-                  if (value == 'edit') onOpen();
-                  if (value == 'pdf') onPdf();
-                  if (value == 'share') onShare();
-                  if (value == 'delete') onDelete();
-                },
-                itemBuilder: (_) => const [
-                  PopupMenuItem(value: 'edit', child: Text('Edit')),
-                  PopupMenuItem(value: 'pdf', child: Text('View / Print PDF')),
-                  PopupMenuItem(
-                      value: 'share',
-                      child: Text('Share via Email / WhatsApp')),
-                  PopupMenuItem(value: 'delete', child: Text('Delete')),
-                ],
-              ),
-            ],
-          ),
-        ),
-      );
-}
-
-class _StatusPill extends StatelessWidget {
-  const _StatusPill({required this.label, required this.color});
-  final String label;
-  final Color color;
-
-  @override
-  Widget build(BuildContext context) => Container(
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-        decoration: BoxDecoration(
-          color: color.withValues(alpha: .1),
-          borderRadius: BorderRadius.circular(20),
-        ),
-        child: Text(
-          label,
-          style: TextStyle(
-              color: color, fontWeight: FontWeight.w700, fontSize: 11),
-        ),
-      );
-}
-
-class _EmptyState extends StatelessWidget {
-  const _EmptyState({
-    required this.icon,
-    required this.title,
-    required this.message,
-    required this.actionLabel,
-    required this.onAction,
-    this.secondaryLabel,
-    this.onSecondary,
-  });
-
-  final IconData icon;
-  final String title;
-  final String message;
-  final String actionLabel;
-  final VoidCallback onAction;
-  final String? secondaryLabel;
-  final VoidCallback? onSecondary;
-
-  @override
-  Widget build(BuildContext context) => Card(
-        child: Padding(
-          padding: const EdgeInsets.all(36),
-          child: Center(
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 420),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Container(
-                    width: 54,
-                    height: 54,
-                    decoration: BoxDecoration(
-                        color: _brand.withValues(alpha: .08),
-                        borderRadius: BorderRadius.circular(16)),
-                    child: Icon(icon, color: _brand, size: 28),
-                  ),
-                  const SizedBox(height: 16),
-                  Text(title,
-                      style: const TextStyle(
-                          fontSize: 18,
-                          fontWeight: FontWeight.w800,
-                          color: _ink)),
-                  const SizedBox(height: 6),
-                  Text(message,
-                      textAlign: TextAlign.center,
-                      style: const TextStyle(color: _muted, height: 1.4)),
-                  const SizedBox(height: 20),
-                  Wrap(
-                    spacing: 10,
-                    runSpacing: 10,
-                    alignment: WrapAlignment.center,
-                    children: [
-                      FilledButton.icon(
-                        onPressed: onAction,
-                        icon: const Icon(Icons.add, size: 18),
-                        label: Text(actionLabel),
-                      ),
-                      if (secondaryLabel != null && onSecondary != null)
-                        OutlinedButton(
-                            onPressed: onSecondary,
-                            child: Text(secondaryLabel!)),
-                    ],
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ),
-      );
-}
-
-class DocumentEditorDialog extends StatefulWidget {
-  const DocumentEditorDialog({
-    super.key,
-    required this.kind,
-    required this.nextNumber,
-    this.currencyLocked = false,
-    this.existing,
-    this.customers = const [],
-    this.items = const [],
-    required this.currencyCode,
-    required this.langCode,
-    this.existingNumbers = const [],
-  });
-
-  final DocumentKind kind;
-  final String nextNumber;
-  final bool currencyLocked;
-  final BusinessDocument? existing;
-  final List<Customer> customers;
-  final List<Item> items;
-  final String currencyCode;
-  final String langCode;
-  final List<String> existingNumbers;
-
-  @override
-  State<DocumentEditorDialog> createState() => _DocumentEditorDialogState();
-}
-
-class _DocumentEditorDialogState extends State<DocumentEditorDialog> {
-  final _formKey = GlobalKey<FormState>();
-  late final TextEditingController _number;
-  late final TextEditingController _client;
-  late final TextEditingController _email;
-  late final TextEditingController _discount;
-  late final TextEditingController _tax;
-  late final TextEditingController _notes;
-  late DateTime _issueDate;
-  late DateTime _dueDate;
-  late String _status;
-  late String _currency;
-  late List<_LineDraft> _lines;
-  String _customerId = '';
-  String _customerNameSnapshot = '';
-
-  @override
-  void initState() {
-    super.initState();
-    final old = widget.existing;
-    _number = TextEditingController(text: old?.number ?? widget.nextNumber);
-    _client = TextEditingController(text: old?.clientName ?? '');
-    _email = TextEditingController(text: old?.clientEmail ?? '');
-    _discount = TextEditingController(text: (old?.discount ?? 0).toString());
-    _tax = TextEditingController(text: (old?.taxPercent ?? 15).toString());
-    _notes = TextEditingController(text: old?.notes ?? '');
-    _issueDate = old?.issueDate ?? DateTime.now();
-    _dueDate = old?.dueDate ?? DateTime.now().add(const Duration(days: 14));
-    _status = old?.status ?? 'Draft';
-    _currency = old?.currencyCode ?? widget.currencyCode;
-    _customerId = old?.customerId ?? '';
-    _customerNameSnapshot = old?.clientName ?? '';
-    _lines = (old?.lines ?? []).map(_LineDraft.fromLine).toList();
-    if (_lines.isEmpty) _lines = [_LineDraft()];
-  }
-
-  @override
-  void dispose() {
-    _number.dispose();
-    _client.dispose();
-    _email.dispose();
-    _discount.dispose();
-    _tax.dispose();
-    _notes.dispose();
-    for (final line in _lines) {
-      line.dispose();
-    }
-    super.dispose();
-  }
-
-  double get _subtotal =>
-      roundMoney(_lines.fold<double>(0.0, (sum, line) => sum + line.amount));
-  double get _discountValue {
-    final value = double.tryParse(_discount.text) ?? 0;
-    if (!value.isFinite || value <= 0) return 0;
-    return roundMoney(value.clamp(0.0, _subtotal).toDouble());
-  }
-
-  double get _taxValue {
-    final value = double.tryParse(_tax.text) ?? 0;
-    return value.isFinite ? value.clamp(0.0, 100.0).toDouble() : 0.0;
-  }
-
-  double get _total {
-    final taxable =
-        (_subtotal - _discountValue).clamp(0.0, double.infinity).toDouble();
-    final tax = roundMoney(taxable * _taxValue / 100);
-    return roundMoney(taxable + tax);
-  }
-
-  Future<DateTime?> _chooseDate(DateTime initial) => showDatePicker(
-        context: context,
-        initialDate: initial,
-        firstDate: DateTime(2000),
-        lastDate: DateTime(2100),
-      );
-
-  Future<void> _pickCustomer() async {
-    final selected = await showDialog<Customer>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Select Client from Directory'),
-        content: SizedBox(
-          width: 400,
-          height: 350,
-          child: widget.customers.isEmpty
-              ? const Center(
-                  child: Text('No saved clients. Add clients in Clients tab.'))
-              : ListView.separated(
-                  itemCount: widget.customers.length,
-                  separatorBuilder: (_, __) => const Divider(height: 1),
-                  itemBuilder: (context, idx) {
-                    final c = widget.customers[idx];
-                    return ListTile(
-                      title: Text(c.name,
-                          style: const TextStyle(fontWeight: FontWeight.bold)),
-                      subtitle: Text(c.email.isNotEmpty ? c.email : c.phone),
-                      onTap: () => Navigator.pop(ctx, c),
-                    );
-                  },
-                ),
-        ),
-        actions: [
-          TextButton(
-              onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
-        ],
-      ),
-    );
-
-    if (selected != null) {
-      setState(() {
-        _client.text = selected.name;
-        _email.text = selected.email;
-        _customerId = selected.id;
-        _customerNameSnapshot = selected.name;
-      });
-    }
-  }
-
-  Future<void> _pickCatalogItem(_LineDraft line) async {
-    final selected = await showDialog<Item>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Select Item from Catalog'),
-        content: SizedBox(
-          width: 400,
-          height: 350,
-          child: widget.items.isEmpty
-              ? const Center(
-                  child: Text(
-                      'No saved items. Add products/services in Items tab.'))
-              : ListView.separated(
-                  itemCount: widget.items.length,
-                  separatorBuilder: (_, __) => const Divider(height: 1),
-                  itemBuilder: (context, idx) {
-                    final item = widget.items[idx];
-                    return ListTile(
-                      title: Text(item.name,
-                          style: const TextStyle(fontWeight: FontWeight.bold)),
-                      subtitle: Text(
-                          '${item.category} • ${CurrencyHelper.format(item.unitPrice, _currency)} / ${item.unit}'),
-                      onTap: () => Navigator.pop(ctx, item),
-                    );
-                  },
-                ),
-        ),
-        actions: [
-          TextButton(
-              onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
-        ],
-      ),
-    );
-
-    if (selected != null) {
-      final hasOtherDescription = _lines.any((other) =>
-          !identical(other, line) && other.description.text.trim().isNotEmpty);
-      setState(() {
-        line.description.text = selected.name;
-        line.price.text = selected.unitPrice.toStringAsFixed(2);
-        if (!hasOtherDescription) {
-          _tax.text = selected.taxRate.toStringAsFixed(1);
-        }
-      });
-      if (hasOtherDescription &&
-          (double.tryParse(_tax.text) ?? 0) != selected.taxRate &&
-          mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-              content: Text(
-                  'This document applies one tax rate to all lines. Review the tax rate in Totals and terms.')),
-        );
-      }
-    }
-  }
-
-  void _submit() {
-    if (!_formKey.currentState!.validate()) return;
-    final old = widget.existing;
-    if (widget.currencyLocked && old != null && _currency != old.currencyCode) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-            content: Text(
-                'Currency cannot be changed after payments have been recorded.')),
-      );
-      return;
-    }
-    if (_dueDate.isBefore(
-        DateTime(_issueDate.year, _issueDate.month, _issueDate.day))) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-            content: Text('Due date cannot be earlier than the issue date.')),
-      );
-      return;
-    }
-    final doc = BusinessDocument(
-      id: old?.id ?? const Uuid().v4(),
-      number: _number.text.trim(),
-      kind: old?.kind ?? widget.kind,
-      clientName: _client.text.trim(),
-      clientEmail: _email.text.trim(),
-      issueDate: _issueDate,
-      dueDate: _dueDate,
-      status: _status,
-      currencyCode: _currency,
-      lines: _lines
-          .map((line) => DocumentLine(
-                id: line.id,
-                description: line.description.text.trim(),
-                quantity: double.tryParse(line.quantity.text) ?? 1,
-                unitPrice: double.tryParse(line.price.text) ?? 0,
-              ))
-          .toList(),
-      taxPercent: _taxValue,
-      discount: _discountValue,
-      notes: _notes.text.trim(),
-      customerId: _customerId,
-    );
-    Navigator.of(context).pop(doc);
-  }
-
-  @override
-  Widget build(BuildContext context) => Dialog.fullscreen(
-        child: Scaffold(
-          appBar: AppBar(
-            leading: IconButton(
-                icon: const Icon(Icons.close),
-                onPressed: () => Navigator.pop(context)),
-            title: Text(
-                '${widget.existing == null ? 'New' : 'Edit'} ${widget.kind == DocumentKind.invoice ? 'invoice' : 'quote'}'),
-            actions: [
-              Padding(
-                padding: const EdgeInsets.only(right: 12),
-                child: Center(
-                  child: FilledButton.icon(
-                    onPressed: _submit,
-                    icon: const Icon(Icons.check, size: 18),
-                    label: const Text('Save document'),
-                  ),
-                ),
-              ),
-            ],
-          ),
-          body: Form(
-            key: _formKey,
-            child: SingleChildScrollView(
-              padding: const EdgeInsets.all(20),
-              child: Center(
-                child: ConstrainedBox(
-                  constraints: const BoxConstraints(maxWidth: 900),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Card(
-                        child: Padding(
-                          padding: const EdgeInsets.all(20),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Row(
-                                children: [
-                                  Expanded(
-                                    child: Text('Document details',
-                                        style: Theme.of(context)
-                                            .textTheme
-                                            .titleLarge),
-                                  ),
-                                  if (widget.customers.isNotEmpty)
-                                    OutlinedButton.icon(
-                                      onPressed: _pickCustomer,
-                                      icon: const Icon(
-                                          Icons.person_search_outlined,
-                                          size: 16),
-                                      label: const Text('Pick saved client'),
-                                    ),
-                                ],
-                              ),
-                              const SizedBox(height: 18),
-                              LayoutBuilder(
-                                builder: (context, constraints) {
-                                  final cols =
-                                      constraints.maxWidth > 650 ? 2 : 1;
-                                  return _ResponsiveFields(
-                                      columns: cols,
-                                      children: [
-                                        TextFormField(
-                                          controller: _number,
-                                          decoration: const InputDecoration(
-                                              labelText: 'Document number'),
-                                          validator: (v) {
-                                            final value = v?.trim() ?? '';
-                                            if (value.isEmpty) {
-                                              return 'Required';
-                                            }
-                                            if (widget.existingNumbers.contains(
-                                                value.toLowerCase())) {
-                                              return 'This document number is already in use';
-                                            }
-                                            return null;
-                                          },
-                                        ),
-                                        DropdownButtonFormField<String>(
-                                          initialValue: _status,
-                                          decoration: const InputDecoration(
-                                              labelText: 'Status'),
-                                          items: (widget.kind ==
-                                                      DocumentKind.invoice
-                                                  ? [
-                                                      'Draft',
-                                                      'Sent',
-                                                      'Pending',
-                                                      'Paid',
-                                                      'Overdue',
-                                                      'Void'
-                                                    ]
-                                                  : [
-                                                      'Draft',
-                                                      'Sent',
-                                                      'Pending',
-                                                      'Accepted',
-                                                      'Declined'
-                                                    ])
-                                              .map((value) => DropdownMenuItem(
-                                                  value: value,
-                                                  child: Text(value)))
-                                              .toList(),
-                                          onChanged: (value) => setState(
-                                              () => _status = value ?? 'Draft'),
-                                        ),
-                                        TextFormField(
-                                          controller: _client,
-                                          decoration: const InputDecoration(
-                                              labelText:
-                                                  'Client / business name'),
-                                          onChanged: (value) {
-                                            if (_customerId.isNotEmpty &&
-                                                value.trim() !=
-                                                    _customerNameSnapshot) {
-                                              _customerId = '';
-                                              _customerNameSnapshot = '';
-                                            }
-                                          },
-                                          validator: (v) =>
-                                              v == null || v.trim().isEmpty
-                                                  ? 'Enter a client name'
-                                                  : null,
-                                        ),
-                                        TextFormField(
-                                          controller: _email,
-                                          keyboardType:
-                                              TextInputType.emailAddress,
-                                          decoration: const InputDecoration(
-                                              labelText:
-                                                  'Client email (optional)'),
-                                          validator: (v) {
-                                            if (v == null || v.trim().isEmpty) {
-                                              return null;
-                                            }
-                                            return RegExp(
-                                                        r'^[^@\s]+@[^@\s]+\.[^@\s]+$')
-                                                    .hasMatch(v.trim())
-                                                ? null
-                                                : 'Enter a valid email';
-                                          },
-                                        ),
-                                        DropdownButtonFormField<String>(
-                                          initialValue: _currency,
-                                          decoration: const InputDecoration(
-                                              labelText: 'Currency'),
-                                          items: CurrencyHelper.currencies
-                                              .map((c) => DropdownMenuItem(
-                                                  value: c.code,
-                                                  child: Text(
-                                                      '${c.code} (${c.symbol})')))
-                                              .toList(),
-                                          onChanged: (value) => setState(
-                                              () => _currency = value ?? 'USD'),
-                                        ),
-                                        _DateButton(
-                                          label: 'Issue date',
-                                          date: _issueDate,
-                                          onTap: () async {
-                                            final date =
-                                                await _chooseDate(_issueDate);
-                                            if (date != null) {
-                                              setState(() => _issueDate = date);
-                                            }
-                                          },
-                                        ),
-                                        _DateButton(
-                                          label: 'Due date',
-                                          date: _dueDate,
-                                          onTap: () async {
-                                            final date =
-                                                await _chooseDate(_dueDate);
-                                            if (date != null) {
-                                              setState(() => _dueDate = date);
-                                            }
-                                          },
-                                        ),
-                                      ]);
-                                },
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
-                      const SizedBox(height: 16),
-                      Card(
-                        child: Padding(
-                          padding: const EdgeInsets.all(20),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Row(
-                                children: [
-                                  Expanded(
-                                    child: Text('Line items',
-                                        style: Theme.of(context)
-                                            .textTheme
-                                            .titleLarge),
-                                  ),
-                                  OutlinedButton.icon(
-                                    onPressed: () => setState(
-                                        () => _lines.add(_LineDraft())),
-                                    icon: const Icon(Icons.add, size: 17),
-                                    label: const Text('Add item'),
-                                  ),
-                                ],
-                              ),
-                              const SizedBox(height: 14),
-                              ..._lines.asMap().entries.map((entry) {
-                                final index = entry.key;
-                                final line = entry.value;
-                                return Padding(
-                                  padding: const EdgeInsets.only(bottom: 14),
-                                  child: Column(
-                                    children: [
-                                      Row(
-                                        children: [
-                                          Expanded(
-                                            child: Text('Item ${index + 1}',
-                                                style: const TextStyle(
-                                                    fontWeight:
-                                                        FontWeight.w700)),
-                                          ),
-                                          if (widget.items.isNotEmpty)
-                                            TextButton.icon(
-                                              onPressed: () =>
-                                                  _pickCatalogItem(line),
-                                              icon: const Icon(
-                                                  Icons.inventory_2_outlined,
-                                                  size: 15),
-                                              label: const Text('Catalog Item'),
-                                            ),
-                                          if (_lines.length > 1)
-                                            IconButton(
-                                              tooltip: 'Remove item',
-                                              onPressed: () => setState(() {
-                                                line.dispose();
-                                                _lines.remove(line);
-                                              }),
-                                              icon: const Icon(
-                                                  Icons.delete_outline,
-                                                  color: Color(0xFFB42318)),
-                                            ),
-                                        ],
-                                      ),
-                                      LayoutBuilder(
-                                        builder: (context, constraints) {
-                                          final cols =
-                                              constraints.maxWidth > 650
-                                                  ? 3
-                                                  : 1;
-                                          return _ResponsiveFields(
-                                              columns: cols,
-                                              children: [
-                                                TextFormField(
-                                                  controller: line.description,
-                                                  decoration:
-                                                      const InputDecoration(
-                                                          labelText:
-                                                              'Description'),
-                                                  validator: (v) => v == null ||
-                                                          v.trim().isEmpty
-                                                      ? 'Required'
-                                                      : null,
-                                                ),
-                                                TextFormField(
-                                                  controller: line.quantity,
-                                                  keyboardType:
-                                                      const TextInputType
-                                                          .numberWithOptions(
-                                                          decimal: true),
-                                                  decoration:
-                                                      const InputDecoration(
-                                                          labelText:
-                                                              'Quantity'),
-                                                  validator: (v) {
-                                                    final n = double.tryParse(
-                                                        v ?? '');
-                                                    return n == null ||
-                                                            !n.isFinite ||
-                                                            n <= 0 ||
-                                                            n > 1e9
-                                                        ? 'Enter a quantity above zero (maximum 1,000,000,000)'
-                                                        : null;
-                                                  },
-                                                  onChanged: (_) =>
-                                                      setState(() {}),
-                                                ),
-                                                TextFormField(
-                                                  controller: line.price,
-                                                  keyboardType:
-                                                      const TextInputType
-                                                          .numberWithOptions(
-                                                          decimal: true),
-                                                  decoration:
-                                                      const InputDecoration(
-                                                          labelText:
-                                                              'Unit price'),
-                                                  validator: (v) {
-                                                    final n = double.tryParse(
-                                                        v ?? '');
-                                                    return n == null ||
-                                                            !n.isFinite ||
-                                                            n < 0 ||
-                                                            n > 1e12
-                                                        ? 'Enter a valid price (maximum 1,000,000,000,000)'
-                                                        : null;
-                                                  },
-                                                  onChanged: (_) =>
-                                                      setState(() {}),
-                                                ),
-                                              ]);
-                                        },
-                                      ),
-                                      Align(
-                                        alignment: Alignment.centerRight,
-                                        child: Text(
-                                          'Line total: ${CurrencyHelper.format(line.amount, _currency)}',
-                                          style: const TextStyle(
-                                              fontWeight: FontWeight.w700),
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                );
-                              }),
-                            ],
-                          ),
-                        ),
-                      ),
-                      const SizedBox(height: 16),
-                      Card(
-                        child: Padding(
-                          padding: const EdgeInsets.all(20),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text('Totals and terms',
-                                  style:
-                                      Theme.of(context).textTheme.titleLarge),
-                              const SizedBox(height: 16),
-                              LayoutBuilder(
-                                builder: (context, constraints) {
-                                  final cols =
-                                      constraints.maxWidth > 650 ? 2 : 1;
-                                  return _ResponsiveFields(
-                                      columns: cols,
-                                      children: [
-                                        TextFormField(
-                                          controller: _discount,
-                                          keyboardType: const TextInputType
-                                              .numberWithOptions(decimal: true),
-                                          decoration: const InputDecoration(
-                                              labelText: 'Discount amount'),
-                                          onChanged: (_) => setState(() {}),
-                                          validator: (v) {
-                                            final n = double.tryParse(v ?? '');
-                                            return n == null ||
-                                                    !n.isFinite ||
-                                                    n < 0
-                                                ? 'Enter zero or more'
-                                                : null;
-                                          },
-                                        ),
-                                        TextFormField(
-                                          controller: _tax,
-                                          keyboardType: const TextInputType
-                                              .numberWithOptions(decimal: true),
-                                          decoration: const InputDecoration(
-                                              labelText: 'Tax rate (%)'),
-                                          onChanged: (_) => setState(() {}),
-                                          validator: (v) {
-                                            final n = double.tryParse(v ?? '');
-                                            return n == null ||
-                                                    !n.isFinite ||
-                                                    n < 0 ||
-                                                    n > 100
-                                                ? 'Use 0–100%'
-                                                : null;
-                                          },
-                                        ),
-                                      ]);
-                                },
-                              ),
-                              const SizedBox(height: 16),
-                              _TotalLine(
-                                  label: 'Subtotal',
-                                  value: CurrencyHelper.format(
-                                      _subtotal, _currency)),
-                              _TotalLine(
-                                  label: 'Discount',
-                                  value:
-                                      '-${CurrencyHelper.format(_discountValue, _currency)}'),
-                              _TotalLine(
-                                  label: 'Tax',
-                                  value: CurrencyHelper.format(
-                                      _total - (_subtotal - _discountValue),
-                                      _currency)),
-                              const Divider(height: 24),
-                              _TotalLine(
-                                  label: 'Total due',
-                                  value:
-                                      CurrencyHelper.format(_total, _currency),
-                                  bold: true),
-                              const SizedBox(height: 14),
-                              TextFormField(
-                                controller: _notes,
-                                maxLines: 3,
-                                decoration: const InputDecoration(
-                                    labelText: 'Notes and terms',
-                                    alignLabelWithHint: true),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
-                      const SizedBox(height: 24),
-                      Align(
-                        alignment: Alignment.centerRight,
-                        child: FilledButton.icon(
-                          onPressed: _submit,
-                          icon: const Icon(Icons.check),
-                          label: const Text('Save document'),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ),
-          ),
-        ),
-      );
-}
-
-class _LineDraft {
-  _LineDraft(
-      {String? id,
-      String description = '',
-      String quantity = '1',
-      String price = '0'})
-      : id = id ?? const Uuid().v4(),
-        description = TextEditingController(text: description),
-        quantity = TextEditingController(text: quantity),
-        price = TextEditingController(text: price);
-
-  final String id;
-  final TextEditingController description;
-  final TextEditingController quantity;
-  final TextEditingController price;
-
-  double get amount {
-    final q = double.tryParse(quantity.text) ?? 0;
-    final p = double.tryParse(price.text) ?? 0;
-    final quantityValue = q.isFinite ? q.clamp(0.0, 1e9).toDouble() : 0.0;
-    final priceValue = p.isFinite ? p.clamp(0.0, 1e12).toDouble() : 0.0;
-    return roundMoney(quantityValue * priceValue);
-  }
-
-  factory _LineDraft.fromLine(DocumentLine line) => _LineDraft(
-        id: line.id,
-        description: line.description,
-        quantity: line.quantity.toString(),
-        price: line.unitPrice.toString(),
-      );
-
-  void dispose() {
-    description.dispose();
-    quantity.dispose();
-    price.dispose();
-  }
-}
-
-class _ResponsiveFields extends StatelessWidget {
-  const _ResponsiveFields({required this.columns, required this.children});
-  final int columns;
-  final List<Widget> children;
-
-  @override
-  Widget build(BuildContext context) {
-    if (columns == 1) {
-      return Column(
-          children: children
-              .map((child) => Padding(
-                  padding: const EdgeInsets.only(bottom: 12), child: child))
-              .toList());
-    }
-    return Column(
-      children: [
-        for (var i = 0; i < children.length; i += columns)
-          Padding(
-            padding: const EdgeInsets.only(bottom: 12),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                for (var j = i;
-                    j <
-                        (i + columns < children.length
-                            ? i + columns
-                            : children.length);
-                    j++) ...[
-                  if (j > i) const SizedBox(width: 12),
-                  Expanded(child: children[j]),
-                ],
-                if ((children.length - i) < columns)
-                  for (var pad = 0;
-                      pad < columns - (children.length - i);
-                      pad++)
-                    const Expanded(child: SizedBox()),
-              ],
-            ),
-          ),
-      ],
-    );
-  }
-}
-
-class _DateButton extends StatelessWidget {
-  const _DateButton(
-      {required this.label, required this.date, required this.onTap});
-  final String label;
-  final DateTime date;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) => InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(12),
-        child: InputDecorator(
-          decoration: InputDecoration(
-              labelText: label,
-              suffixIcon: const Icon(Icons.calendar_month_outlined, size: 18)),
-          child: Text(dateLabel(date)),
-        ),
-      );
-}
-
-class _TotalLine extends StatelessWidget {
-  const _TotalLine(
-      {required this.label, required this.value, this.bold = false});
-  final String label;
-  final String value;
-  final bool bold;
-
-  @override
-  Widget build(BuildContext context) => Padding(
-        padding: const EdgeInsets.symmetric(vertical: 5),
-        child: Row(
-          children: [
-            Expanded(
-              child: Text(label,
-                  style: TextStyle(
-                      color: bold ? _ink : _muted,
-                      fontWeight: bold ? FontWeight.w800 : FontWeight.w500)),
-            ),
-            Text(value,
-                style: TextStyle(
-                    color: _ink,
-                    fontWeight: bold ? FontWeight.w800 : FontWeight.w600,
-                    fontSize: bold ? 19 : 14)),
-          ],
-        ),
-      );
-}

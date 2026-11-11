@@ -5,8 +5,8 @@ import 'services/subscription_service.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  const supabaseUrl = String.fromEnvironment('SUPABASE_URL', defaultValue: 'https://gcrzwkzithihyhyftfgn.supabase.co');
-  const supabaseKey = String.fromEnvironment('SUPABASE_PUBLISHABLE_KEY', defaultValue: 'sb_publishable_ZHYSD8wQAKADY9Bjp4L9mQ_46EXe9KE');
+  const supabaseUrl = String.fromEnvironment('SUPABASE_URL');
+  const supabaseKey = String.fromEnvironment('SUPABASE_PUBLISHABLE_KEY');
   if (supabaseUrl.isNotEmpty && supabaseKey.isNotEmpty && !supabaseKey.startsWith('sb_secret_')) {
     try {
       await Supabase.initialize(url: supabaseUrl, publishableKey: supabaseKey);

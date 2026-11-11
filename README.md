@@ -1,48 +1,103 @@
-# Ledgerly — Flutter
+# Ledgerly
 
-Ledgerly is an offline-first quotes and invoicing app. A new workspace starts without sample or demo records.
+Ledgerly is an offline-first quotes and invoicing application for small businesses. A new workspace starts empty; the app does not seed demo customers or invoices.
 
-## Included
+## Current release status
 
-- Responsive Material 3 dashboard and navigation
-- Create, edit, search, export/share, and delete quotes and invoices
-- Line items, quantities, unit prices, discounts, tax, and calculated totals
-- Customer and item catalogues, payment tracking, and basic analytics
-- Business profile, invoice numbering, currency/language settings, and company logo
-- Local persistence and JSON workspace backup/restore
-- Optional account and subscription flows using Supabase, PayPal, and RevenueCat scaffolding
+**Status: release candidate under engineering review — not approved for production launch.**
 
-## Run and validate
+This repository currently contains Flutter Web and Windows host projects. Android and iOS host projects are not present, so Android/iOS are not supported release targets in this repository. A successful Web compilation alone does not establish production readiness.
 
-1. Install Flutter and the SDK/toolchain for the platform you intend to run.
-2. Flutter web and Windows host folders are included. Android and iOS host folders are not currently included. Windows desktop builds require Windows and Visual Studio with the **Desktop development with C++** workload; Visual Studio Code alone is not sufficient.
-3. In the project folder, run:
+## Features
+
+- Create, edit, search, share, print and delete invoices and quotes.
+- Line items, quantities, unit prices, discounts, tax and calculated totals.
+- Customer and item catalogues, payment tracking and basic analytics.
+- Business profile, invoice/quote numbering, currency/language settings and company logo.
+- Local workspace persistence and JSON backup/restore.
+- Optional Supabase authentication and server-verified subscription flows using PayPal and RevenueCat where the relevant platform/provider configuration exists.
+
+## Supported and unsupported platforms
+
+| Platform | Repository support | Release caveat |
+|---|---|---|
+| Web | Host project present | Run the release build and test in supported browsers before publishing. Browser storage is local to the browser/origin and can be cleared by the user or browser policy. |
+| Windows desktop | Host project present | Requires Windows and Visual Studio with the **Desktop development with C++** workload. Store/MSIX packaging and signing are separate release tasks. |
+| Android | **Not supported** | No `android/` host project is included. Do not publish an APK/AAB from this repository. |
+| iOS | **Not supported** | No `ios/` host project is included. Do not submit an iOS build from this repository. |
+| Linux/macOS | **Not supported** | No corresponding Flutter host projects are included. |
+
+### SDK and toolchain requirements
+
+- Dart constraint declared by `pubspec.yaml`: `>=3.3.0 <4.0.0`.
+- Use a current stable Flutter SDK compatible with that Dart constraint and the dependency versions resolved by `flutter pub get`.
+- The repository does not pin an exact Flutter SDK version or declare a minimum browser version.
+- Windows builds require the Windows desktop toolchain described above. The Windows CMake project declares CMake 3.14 as its minimum.
+- No Android minSdk/targetSdk or iOS deployment target is declared because those platform projects are absent.
+
+## Local development
+
+1. Install Flutter stable and verify the toolchain:
+   ```sh
+   flutter doctor -v
+   ```
+2. From the repository root:
    ```sh
    flutter pub get
    flutter analyze
-   flutter test
+   flutter test --reporter expanded
    ```
-4. Run or build the browser version with:
+3. Run Web locally:
    ```sh
    flutter run -d web-server --web-port 8080
-   flutter build web --release
    ```
-   For Windows, after installing the Windows toolchain, run:
+4. Run Windows locally from a Windows machine with the required Visual Studio workload:
    ```powershell
    flutter run -d windows
-   flutter build windows --release
    ```
-   For Android, first install the Android SDK and add the correct platform project/ID, then:
-   ```sh
-   flutter run
-   flutter build apk --release
-   ```
+
+## Release builds
+
+Web:
+```sh
+flutter pub get
+flutter analyze
+flutter test --reporter expanded
+flutter build web --release
+```
+
+Windows (on Windows with Visual Studio C++ desktop workload):
+```powershell
+flutter build windows --release
+```
+
+Do not treat a local build as a release sign-off. Review CI, test backup recovery with disposable fixtures, test realistic PDFs, verify PayPal in sandbox, and complete viewport/device checks before release.
+
+## Local storage, backups and privacy
+
+**The current workspace is local-only. Ledgerly does not provide cloud workspace sync or cross-device restoration in this release.** Supabase authentication/subscription support does not mean that invoices, customers, items, payments or business-profile data are synced to Supabase.
+
+- Workspace records are persisted on the current device/browser using the app's local preferences storage.
+- Browser users can lose local workspace data if browser/site data is cleared, storage is evicted, the browser profile is removed, or the device is lost.
+- Export backups regularly and keep copies in a secure location separate from the device.
+- JSON backups are not encrypted by Ledgerly. They can contain customer names, emails, phone numbers, billing/shipping addresses, tax numbers, invoice history, business contact details and bank/payment instructions. Treat the exported file as confidential business data.
+- Business profile bank details, customer contact details, addresses and tax numbers are stored locally with the workspace and may be included in generated PDFs or backups.
+- Do not store passwords, card numbers, bank login credentials, API secrets or other authentication credentials in customer notes, invoice notes, or business-profile fields.
+- Ledgerly does not silently migrate local records to a cloud workspace. There is no cloud workspace migration feature in this release.
 
 ## Supabase configuration
 
-Supabase-backed sign-in and subscription features are optional at build time. To enable them, provide `SUPABASE_URL` and `SUPABASE_PUBLISHABLE_KEY` with `--dart-define`; these values are public client configuration, not server secrets. Never include a Supabase service-role key, SMTP credential, PayPal secret, or RevenueCat webhook secret in a Flutter build or Git. Web signup uses the current HTTPS origin as its confirmation return URL. Windows signup must also provide `SUPABASE_AUTH_REDIRECT_URL`, set to a return URL registered in Supabase Authentication URL Configuration. See [`supabase/auth-email-setup.md`](supabase/auth-email-setup.md) for SMTP, branded email, and redirect setup.
+Supabase account and subscription features are optional. The Flutter app contains no built-in production project URL or public key. If either required value is missing, account and billing features remain unavailable while local workspace features can still be used.
 
-Example Windows release build (replace the placeholders with your own public project values and registered HTTPS return URL):
+Supply public client configuration at build time only when you intend to enable the account features:
+
+```sh
+flutter build web --release \
+  --dart-define=SUPABASE_URL=https://your-project-ref.supabase.co \
+  --dart-define=SUPABASE_PUBLISHABLE_KEY=your-publishable-key
+```
+
+For Windows signup, also set `SUPABASE_AUTH_REDIRECT_URL` to a registered HTTPS return URL:
 
 ```powershell
 flutter build windows --release `
@@ -51,19 +106,42 @@ flutter build windows --release `
   --dart-define=SUPABASE_AUTH_REDIRECT_URL=https://app.example.com/
 ```
 
-## Microsoft Store (Windows)
+These are public client settings. Never put a Supabase service-role key, PayPal client secret, webhook secret, SMTP password, or RevenueCat webhook authorization secret in Flutter build arguments, source control, or a client application.
 
-- The Windows runner and a draft Ledgerly icon/square-logo set are present, but this source does not yet contain a Store-ready MSIX. The package manifest must use the exact **Package/Identity Name** and **Publisher** reserved for Ledgerly in Partner Center. Do not replace those values with guessed identifiers. Store listing screenshots and metadata are also required.
-- Build the Windows Release executable on a Windows machine with Visual Studio and its Desktop development with C++ workload. Microsoft documents MSIX distribution and the Microsoft Store signing flow in the [Flutter Windows build guide](https://docs.flutter.dev/platform-integration/windows/building); Microsoft also documents package identity/MSIX setup using the `winapp` CLI, which is currently in public preview, in its [Flutter guide](https://learn.microsoft.com/en-us/windows/apps/dev-tools/winapp-cli/guides/flutter).
-- Partner Center submission also requires a reserved product name, package, store listing, and screenshots. Add a privacy-policy URL if the app collects or transmits personal information. See Microsoft's [MSIX submission checklist](https://learn.microsoft.com/en-us/windows/apps/publish/publish-your-app/msix/create-app-submission).
-- Ledgerly is a non-game PC app and currently offers PayPal for Windows subscriptions. Microsoft Store policy allows secure third-party subscription billing for non-game PC apps, but the Store submission must disclose the provider; the app and listing must clearly state subscription pricing/terms and the provider, and transactions must authenticate the user and obtain confirmation. Review [Microsoft Store policy 10.8](https://learn.microsoft.com/en-us/windows/apps/publish/store-policies#108-financial-transactions) before submission.
-- The paywall currently displays **USD 3/month**; verify this matches the live PayPal plan before release. The business profile currently requires bank details. Microsoft policy 10.8.3 says apps that require financial-account information for primary functionality must be submitted under a company developer account; confirm the Partner Center account type, or make those fields optional if appropriate before Store submission.
-- RevenueCat's Flutter purchase SDK does not support Windows. Windows subscription checkout uses PayPal; native Microsoft Store billing is not implemented.
+See [Supabase subscription backend setup](supabase/README.md) and [auth email setup](supabase/auth-email-setup.md). Do not copy production credentials into local development environments.
 
-## Production limitations
+## Subscription and billing terms
 
-- Documents, customers, items, and payments are stored locally on the device. There is no cloud sync or cross-device workspace backup in this release.
-- Subscription checkout requires configured Supabase and provider credentials, an active product/plan, deployed Edge Functions, the schema in `supabase/subscription-schema.sql`, and end-to-end sandbox testing. A PayPal return alone never grants Pro access.
-- The free document cap and premium feature gates are evaluated in the client. Because workspace data is local/offline, the cap is a user-experience limit rather than tamper-resistant server enforcement.
-- PayPal checkout reserves one in-progress attempt per account and reuses a PayPal idempotency key on retries. PayPal and RevenueCat entitlement updates use provider event/status timestamps to ignore stale webhook deliveries. Apply the schema/RPC changes to Supabase before deploying the Edge Functions; sandbox checkout, refund, cancellation, and retry flows still require end-to-end testing before live billing.
-- No tax, accounting, or payment-provider compliance claim is made. Validate local legal and business requirements before commercial launch.
+- The current paywall is configured to describe Ledgerly Pro as **USD $3.00 per month**. Confirm the actual PayPal plan, currency, tax treatment, renewal terms and cancellation process in the provider environment before enabling live checkout.
+- PayPal checkout requires configured Supabase Edge Functions, the subscription schema/migrations, server-side PayPal credentials, webhook signature verification and a public HTTPS app origin.
+- A PayPal approval redirect is not proof of payment. Pro access must be granted only from the server-verified entitlement state.
+- RevenueCat is used only where supported by its SDK and configured for the target store. Windows uses the PayPal web approval flow; native Microsoft Store billing is not implemented.
+- The five-document Free limit is enforced in the client because workspace records are local. It is a product limit, not tamper-resistant server enforcement.
+- Subscription purchases, cancellations, renewals, refunds, reversals and account-binding must be tested in sandbox before any live launch.
+- Subscription availability, billing disclosures and cancellation terms must be checked against the laws and platform rules applicable to the business and customer.
+
+## Known limitations before production launch
+
+- No cloud sync, server-side workspace backup or cross-device document migration.
+- No Android or iOS host projects in this repository.
+- No Microsoft Store-ready signed MSIX package or completed Partner Center listing is included.
+- The app's translations cover selected interface strings; not every screen and PDF label is fully localized yet.
+- The PDF generator is currently implemented in the large home-screen module; dedicated PDF service extraction and comprehensive PDF regression fixtures remain release-candidate work.
+- Minimum browser versions and exact Flutter SDK version are not pinned.
+- No tax, accounting, legal or payment-provider compliance certification is claimed.
+
+## Production launch checklist
+
+- [ ] `flutter pub get` succeeds.
+- [ ] `flutter analyze` reports no issues.
+- [ ] `flutter test --reporter expanded` passes.
+- [ ] `flutter build web --release` succeeds.
+- [ ] Deno lint and Edge Function tests pass.
+- [ ] PostgreSQL schema/RPC/RLS tests pass on a disposable database.
+- [ ] Backup export/import round trips and failure cases are verified without production data.
+- [ ] Payment records cannot be orphaned, duplicated or overpaid; invalid invoice data is rejected before persistence.
+- [ ] PayPal sandbox checkout, webhook verification, renewal, cancellation, refund and reversal are tested end to end.
+- [ ] PDF output is checked for long text, multiple pages, missing logo, partial payments, tax, currency and localized labels.
+- [ ] Responsive and keyboard/screen-reader checks are completed at 375x812, 768x1024, 1280x720 and 1440x900.
+- [ ] Privacy policy, backup handling, subscription disclosures, support contact and platform store requirements are reviewed.
+- [ ] Release artifacts are signed, reproducible and built from a reviewed commit.

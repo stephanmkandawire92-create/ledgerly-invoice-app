@@ -244,4 +244,114 @@ void main() {
     expect((await store.loadPayments()).single.amount, 50);
     expect((await store.loadProfile()).businessName, 'Legacy Business');
   });
+  test('normal saves reject duplicate document IDs and numbers', () async {
+    final store = DocumentStore();
+    final first = makeInvoice('invoice-1');
+    final duplicateId = makeInvoice('invoice-1')..number = 'INV-2';
+    await expectLater(
+      store.save([first, duplicateId]),
+      throwsA(isA<FormatException>()),
+    );
+
+    final duplicateNumber = makeInvoice('invoice-2');
+    await expectLater(
+      store.save([first, duplicateNumber]),
+      throwsA(isA<FormatException>()),
+    );
+    expect(await store.load(), isEmpty);
+  });
+
+  test('normal saves reject unsupported currency and invalid line values',
+      () async {
+    final store = DocumentStore();
+    final unsupported = makeInvoice('invoice-1')..currencyCode = 'XYZ';
+    await expectLater(
+      store.save([unsupported]),
+      throwsA(isA<FormatException>()),
+    );
+
+    final invalidLine = makeInvoice('invoice-2')
+      ..lines.first.quantity = double.nan;
+    await expectLater(
+      store.save([invalidLine]),
+      throwsA(isA<FormatException>()),
+    );
+    expect(await store.load(), isEmpty);
+  });
+
+  test('payment-only saves cannot create orphan or duplicate payments',
+      () async {
+    final store = DocumentStore();
+    final invoice = makeInvoice('invoice-1');
+    await store.save([invoice]);
+    final orphan = Payment(
+      id: 'payment-orphan',
+      invoiceId: 'missing-invoice',
+      paymentDate: DateTime(2026, 1, 2),
+      amount: 10,
+    );
+    await expectLater(
+      store.savePayments([orphan]),
+      throwsA(isA<FormatException>()),
+    );
+
+    final first = Payment(
+      id: 'payment-1',
+      invoiceId: invoice.id,
+      paymentDate: DateTime(2026, 1, 2),
+      amount: 10,
+    );
+    final duplicate = Payment(
+      id: 'payment-1',
+      invoiceId: invoice.id,
+      paymentDate: DateTime(2026, 1, 3),
+      amount: 10,
+    );
+    await expectLater(
+      store.savePayments([first, duplicate]),
+      throwsA(isA<FormatException>()),
+    );
+    expect(await store.loadPayments(), isEmpty);
+  });
+
+  test('legacy workspace can still be loaded and saved after validation',
+      () async {
+    final invoice = makeInvoice('legacy-valid');
+    SharedPreferences.setMockInitialValues({
+      'ledgerly.documents.v1': jsonEncode([invoice.toJson()]),
+    });
+    final store = DocumentStore();
+    expect((await store.load()).single.id, 'legacy-valid');
+    await store.save([invoice]);
+    expect((await store.load()).single.id, 'legacy-valid');
+  });
+
+  test('partial snapshots are rejected without replacing existing bytes',
+      () async {
+    const partial = '{"version":1,"documents":[],"payments":[]}';
+    SharedPreferences.setMockInitialValues({
+      'ledgerly.workspace.snapshot.v1': partial,
+    });
+    final store = DocumentStore();
+
+    await expectLater(store.load(), throwsA(isA<FormatException>()));
+    await expectLater(store.save([makeInvoice('new-invoice')]),
+        throwsA(isA<FormatException>()));
+
+    final prefs = await SharedPreferences.getInstance();
+    expect(prefs.getString('ledgerly.workspace.snapshot.v1'), partial);
+  });
+
+  test('business profile saves reject unsupported currencies without replacing saved profile', () async {
+    final store = DocumentStore();
+    await store.saveProfile(BusinessProfile(currencyCode: 'ZAR'));
+
+    await expectLater(
+      store.saveProfile(BusinessProfile(currencyCode: 'XYZ')),
+      throwsA(isA<FormatException>()),
+    );
+
+    expect((await store.loadProfile()).currencyCode, 'ZAR');
+  });
+
 }

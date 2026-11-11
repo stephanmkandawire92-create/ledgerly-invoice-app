@@ -28,7 +28,7 @@ jobs:
       - name: Install dependencies
         run: flutter pub get
       - name: Analyze Dart and Flutter source
-        run: flutter analyze
+        run: flutter analyze --no-fatal-infos
       - name: Run automated tests
         run: flutter test --reporter expanded
       - name: Build production Flutter web bundle

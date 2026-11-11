@@ -1,4 +1,5 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.118.0";
+import { decideRevenueCatEntitlement, isLedgerlyAccountId } from "../_shared/revenuecat.ts";
 
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), {
   status,
@@ -28,7 +29,7 @@ Deno.serve(async (req) => {
       return json({ error: "Invalid RevenueCat event" }, 400);
     }
     // Purchases must be tied to a signed-in Ledgerly account, never an anonymous RC ID.
-    if (!/^[0-9a-f]{8}-[0-9a-f-]{27,}$/i.test(userId)) {
+    if (!isLedgerlyAccountId(userId)) {
       return json({ error: "Unknown Ledgerly account reference" }, 400);
     }
 
@@ -58,51 +59,38 @@ Deno.serve(async (req) => {
       return json({ received: true, ignored: true });
     }
 
-    const eventTimestamp = Number(event.event_timestamp_ms);
-    const eventDate = new Date(eventTimestamp);
-    if (!Number.isFinite(eventTimestamp) || !Number.isFinite(eventDate.getTime())) {
-      return json({ error: "RevenueCat event has no valid timestamp" }, 400);
+    let decision: ReturnType<typeof decideRevenueCatEntitlement>;
+    try {
+      decision = decideRevenueCatEntitlement({
+        type,
+        eventTimestampMs: Number(event.event_timestamp_ms),
+        expirationAtMs: event.expiration_at_ms == null
+          ? null
+          : Number(event.expiration_at_ms),
+        gracePeriodExpirationAtMs: event.grace_period_expiration_at_ms == null
+          ? null
+          : Number(event.grace_period_expiration_at_ms),
+      }, new Date());
+    } catch (error) {
+      return json({
+        error: error instanceof Error ? error.message : "Invalid RevenueCat event",
+      }, 400);
     }
-
-    const expiryValue = event.expiration_at_ms;
-    const expiryTimestamp = expiryValue == null ? null : Number(expiryValue);
-    if (expiryTimestamp != null && !Number.isFinite(new Date(expiryTimestamp).getTime())) {
-      return json({ error: "RevenueCat event has an invalid expiration" }, 400);
-    }
-    const graceValue = event.grace_period_expiration_at_ms;
-    const graceTimestamp = graceValue == null ? null : Number(graceValue);
-    if (graceTimestamp != null && !Number.isFinite(new Date(graceTimestamp).getTime())) {
-      return json({ error: "RevenueCat event has an invalid grace-period expiration" }, 400);
-    }
-
-    let status: string;
-    let effectiveExpiryMs = expiryTimestamp;
-    if (type === "EXPIRATION" || type === "REFUND") {
-      status = "expired";
-    } else if (type === "BILLING_ISSUE") {
-      // Preserve access only through a provider-confirmed, future grace period.
-      if (graceTimestamp !== null && graceTimestamp > Date.now()) {
-        status = "active";
-        effectiveExpiryMs = graceTimestamp;
-      } else {
-        status = "past_due";
+    if (!decision) {
+      const { error } = await admin.from("billing_webhook_events").insert({
+        provider: "revenuecat",
+        event_id: eventId,
+      });
+      if (error && error.code !== "23505") {
+        return json({ error: "Could not record ignored event" }, 500);
       }
-    } else if (type === "CANCELLATION") {
-      status = "cancelled";
-    } else if (type === "REFUND_REVERSED" || type === "PRODUCT_CHANGE") {
-      status = "active";
-    } else {
-      // Purchases and renewals are active only with a provider-supplied future expiry.
-      status = effectiveExpiryMs !== null && effectiveExpiryMs > Date.now()
-        ? "active"
-        : "expired";
+      return json({ received: true, ignored: true });
     }
+    const status = decision.status;
+    const periodEnd = decision.periodEnd;
 
     const originalId = event.original_transaction_id ?? event.transaction_id ?? eventId;
     const externalId = String(originalId);
-    const periodEnd = effectiveExpiryMs === null
-      ? null
-      : new Date(effectiveExpiryMs).toISOString();
     const { error } = await admin.rpc("apply_revenuecat_entitlement", {
       p_user_id: userId,
       p_subscription_id: externalId,

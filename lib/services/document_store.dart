@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../models/business_document.dart';
+import '../models/currency_helper.dart';
 import '../models/business_profile.dart';
 import '../models/customer.dart';
 import '../models/item.dart';
@@ -34,6 +35,7 @@ class DocumentStore {
   }
 
   Future<void> saveCustomers(List<Customer> customers) async {
+    _ensureUniqueIds(customers.map((customer) => customer.id), 'customers');
     await _saveValue(
         _customersKey, 'customers', Customer.encodeList(customers));
   }
@@ -45,6 +47,16 @@ class DocumentStore {
   }
 
   Future<void> saveItems(List<Item> items) async {
+    _ensureUniqueIds(items.map((item) => item.id), 'items');
+    if (items.any((item) =>
+        !item.unitPrice.isFinite ||
+        item.unitPrice < 0 ||
+        item.unitPrice > 1e12 ||
+        !item.taxRate.isFinite ||
+        item.taxRate < 0 ||
+        item.taxRate > 100)) {
+      throw const FormatException('Items must have valid prices and tax rates.');
+    }
     await _saveValue(_itemsKey, 'items', Item.encodeList(items));
   }
 
@@ -55,13 +67,16 @@ class DocumentStore {
   }
 
   Future<void> savePayments(List<Payment> payments) async {
-    await _saveValue(_paymentsKey, 'payments', Payment.encodeList(payments));
+    // Payments and invoice totals must be committed in one workspace snapshot.
+    await saveDocumentsAndPayments(await load(), payments);
   }
 
   Future<void> saveDocumentsAndPayments(
     List<BusinessDocument> documents,
     List<Payment> payments,
   ) async {
+    _validateDocuments(documents);
+    _ensureUniqueIds(payments.map((payment) => payment.id), 'payments');
     final invoiceTotals = {
       for (final invoice in documents
           .where((document) => document.kind == DocumentKind.invoice))
@@ -106,11 +121,13 @@ class DocumentStore {
       };
     } else {
       final decoded = jsonDecode(snapshotSource);
-      if (decoded is! Map<String, dynamic> || decoded['version'] != 1) {
+      if (decoded is! Map<String, dynamic>) {
         throw const FormatException('Saved workspace snapshot is invalid.');
       }
       snapshot = Map<String, dynamic>.from(decoded);
+      _validateSnapshot(snapshot);
     }
+    _validateSnapshot(snapshot);
     snapshot['documents'] =
         documents.map((document) => document.toJson()).toList();
     snapshot['payments'] = payments.map((payment) => payment.toJson()).toList();
@@ -127,6 +144,11 @@ class DocumentStore {
   }
 
   Future<void> saveProfile(BusinessProfile profile) async {
+    if (!CurrencyHelper.currencies.any(
+        (currency) => currency.code == profile.currencyCode.toUpperCase())) {
+      throw FormatException(
+          'Unsupported business profile currency: ${profile.currencyCode}.');
+    }
     await _saveValue(_profileKey, 'profile', profile.encode());
   }
 
@@ -135,9 +157,10 @@ class DocumentStore {
     final snapshotSource = prefs.getString(_snapshotKey);
     if (snapshotSource == null) return prefs.getString(legacyKey);
     final decoded = jsonDecode(snapshotSource);
-    if (decoded is! Map<String, dynamic> || decoded['version'] != 1) {
+    if (decoded is! Map<String, dynamic>) {
       throw const FormatException('Saved workspace snapshot is invalid.');
     }
+    _validateSnapshot(decoded);
     if (!decoded.containsKey(section)) {
       throw FormatException('Saved workspace snapshot is missing "$section".');
     }
@@ -153,9 +176,10 @@ class DocumentStore {
       return;
     }
     final decoded = jsonDecode(snapshotSource);
-    if (decoded is! Map<String, dynamic> || decoded['version'] != 1) {
+    if (decoded is! Map<String, dynamic>) {
       throw const FormatException('Saved workspace snapshot is invalid.');
     }
+    _validateSnapshot(decoded);
     decoded[section] = jsonDecode(value);
     if (!await prefs.setString(_snapshotKey, jsonEncode(decoded))) {
       throw StateError(
@@ -240,6 +264,11 @@ class DocumentStore {
     }
     final profile =
         BusinessProfile.fromJson(data['profile'] as Map<String, dynamic>);
+    if (!CurrencyHelper.currencies.any(
+        (currency) => currency.code == profile.currencyCode.toUpperCase())) {
+      throw const FormatException(
+          'Backup contains an unsupported business profile currency.');
+    }
 
     _ensureUniqueIds(docs.map((e) => e.id), 'documents');
     _ensureUniqueIds(customers.map((e) => e.id), 'customers');
@@ -310,9 +339,81 @@ class DocumentStore {
       'profile': profile.toJson(),
     };
 
+    _validateSnapshot(snapshot);
     final prefs = await SharedPreferences.getInstance();
     if (!await prefs.setString(_snapshotKey, jsonEncode(snapshot))) {
       throw StateError('Could not atomically restore Ledgerly workspace data.');
+    }
+  }
+
+  void _validateSnapshot(Map<String, dynamic> snapshot) {
+    if (snapshot['version'] != 1) {
+      throw const FormatException(
+          'Saved workspace snapshot has an unsupported version.');
+    }
+    const requiredSections = [
+      'documents',
+      'customers',
+      'items',
+      'payments',
+      'profile',
+    ];
+    for (final section in requiredSections) {
+      if (!snapshot.containsKey(section)) {
+        throw FormatException(
+            'Saved workspace snapshot is missing "$section".');
+      }
+    }
+    if (snapshot['documents'] is! List ||
+        snapshot['customers'] is! List ||
+        snapshot['items'] is! List ||
+        snapshot['payments'] is! List ||
+        snapshot['profile'] is! Map<String, dynamic>) {
+      throw const FormatException(
+          'Saved workspace snapshot contains an invalid section.');
+    }
+  }
+
+  void _validateDocuments(List<BusinessDocument> documents) {
+    _ensureUniqueIds(documents.map((document) => document.id), 'documents');
+    final numbers = <String>{};
+    for (final document in documents) {
+      final number = document.number.trim().toLowerCase();
+      final numberKey = '${document.kind.name}:$number';
+      if (number.isEmpty || !numbers.add(numberKey)) {
+        throw const FormatException(
+            'Documents must have unique, non-empty numbers within each type.');
+      }
+      if (!CurrencyHelper.currencies.any(
+          (currency) => currency.code == document.currencyCode.toUpperCase())) {
+        throw FormatException('Unsupported document currency: ${document.currencyCode}.');
+      }
+      if (!document.taxPercent.isFinite ||
+          document.taxPercent < 0 ||
+          document.taxPercent > 100 ||
+          !document.discount.isFinite ||
+          document.discount < 0) {
+        throw const FormatException(
+            'Documents must have valid non-negative discounts and tax rates.');
+      }
+      if (document.dueDate.isBefore(document.issueDate)) {
+        throw const FormatException(
+            'A document due date cannot be earlier than its issue date.');
+      }
+      _ensureUniqueIds(document.lines.map((line) => line.id), 'document line items');
+      if (document.lines.any((line) =>
+          !line.quantity.isFinite ||
+          line.quantity <= 0 ||
+          line.quantity > 1e9 ||
+          !line.unitPrice.isFinite ||
+          line.unitPrice < 0 ||
+          line.unitPrice > 1e12)) {
+        throw const FormatException(
+            'Document line items must have valid quantities and prices.');
+      }
+      if (!document.total.isFinite) {
+        throw const FormatException('Document total must be a finite amount.');
+      }
     }
   }
 
@@ -346,6 +447,19 @@ class DocumentStore {
       }
       requireDate(entry, 'issueDate', 'document');
       requireDate(entry, 'dueDate', 'document');
+      final currencyCode = entry['currencyCode'];
+      if (currencyCode is! String ||
+          !CurrencyHelper.currencies.any(
+              (currency) => currency.code == currencyCode.toUpperCase())) {
+        throw const FormatException(
+            'Backup contains a document with an unsupported currency.');
+      }
+      final issueDate = DateTime.parse(entry['issueDate'] as String);
+      final dueDate = DateTime.parse(entry['dueDate'] as String);
+      if (dueDate.isBefore(issueDate)) {
+        throw const FormatException(
+            'Backup contains a due date earlier than its issue date.');
+      }
       final number = entry['number'];
       if (number is! String || number.trim().isEmpty) {
         throw const FormatException(
@@ -361,12 +475,23 @@ class DocumentStore {
         throw const FormatException(
             'Backup contains an invalid document line list.');
       }
+      final lineIds = <String>{};
       for (final line in lines) {
         if (line is! Map<String, dynamic> ||
+            line['id'] is! String ||
+            (line['id'] as String).trim().isEmpty ||
+            !lineIds.add((line['id'] as String).trim()) ||
             line['quantity'] is! num ||
             line['unitPrice'] is! num) {
           throw const FormatException(
-              'Backup contains a line without a valid quantity or unit price.');
+              'Backup contains a line without a unique ID, quantity or unit price.');
+        }
+        final quantity = (line['quantity'] as num).toDouble();
+        final unitPrice = (line['unitPrice'] as num).toDouble();
+        if (!quantity.isFinite || quantity <= 0 || quantity > 1e9 ||
+            !unitPrice.isFinite || unitPrice < 0 || unitPrice > 1e12) {
+          throw const FormatException(
+              'Backup contains an invalid line quantity or unit price.');
         }
       }
     }
