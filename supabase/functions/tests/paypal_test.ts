@@ -99,6 +99,13 @@ Deno.test("paymentEvidence requires a matching payment and no newer failure", ()
   });
   assertFalse(paymentEvidence(newerFailure as PaypalSubscription).paid);
 
+  const missingPaymentTime = activeSubscription({
+    billing_info: {
+      last_payment: { amount: { currency_code: "USD", value: "3.00" } },
+    },
+  });
+  assertFalse(paymentEvidence(missingPaymentTime as PaypalSubscription).paid);
+
   const wrongAmount = activeSubscription({
     billing_info: {
       last_payment: { amount: { currency_code: "USD", value: "1.00" }, time: "2026-11-08T11:00:00.000Z" },
@@ -322,6 +329,25 @@ Deno.test("reconciliation maps PayPal terminal states", () => {
     FIXED_NOW,
   );
   if (pending.action === "apply") assertEquals(pending.status, "pending");
+});
+
+Deno.test("a completed sale derives a bounded paid-through date from event time", () => {
+  const subscription = activeSubscription({
+    billing_info: {
+      last_payment: { amount: { currency_code: "USD", value: "3.00" } },
+    },
+  });
+  const decision = decide({
+    eventType: "PAYMENT.SALE.COMPLETED",
+    subscription: subscription as PaypalSubscription,
+    saleAmount: { currency_code: "USD", value: "3.00" },
+    eventTime: "2026-11-08T11:56:00.000Z",
+  });
+  assertEquals(decision.action, "apply");
+  if (decision.action === "apply") {
+    assertEquals(decision.status, "active");
+    assertEquals(decision.periodEnd, "2026-12-08T11:56:00.000Z");
+  }
 });
 
 Deno.test("the Ledgerly plan expectation is exactly USD 3.00 monthly", () => {
