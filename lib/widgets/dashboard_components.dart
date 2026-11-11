@@ -14,6 +14,7 @@ const _line = Color(0xFFE9ECF3);
 
 class LedgerlyTopBar extends StatelessWidget {
   const LedgerlyTopBar({
+    super.key,
     required this.wide,
     required this.searchController,
     required this.langCode,
@@ -173,6 +174,7 @@ class LedgerlyTopBar extends StatelessWidget {
 
 class LedgerlySideNavigation extends StatelessWidget {
   const LedgerlySideNavigation({
+    super.key,
     required this.section,
     required this.langCode,
     required this.documentCount,
@@ -339,7 +341,7 @@ class LedgerlySideNavigation extends StatelessWidget {
 
 class LedgerlyMetricCard extends StatelessWidget {
   const LedgerlyMetricCard(
-      {required this.title,
+      {super.key, required this.title,
       required this.value,
       required this.icon,
       required this.color,
@@ -402,6 +404,7 @@ class LedgerlyMetricCard extends StatelessWidget {
 
 class LedgerlyDocumentRow extends StatelessWidget {
   const LedgerlyDocumentRow({
+    super.key,
     required this.document,
     required this.onOpen,
     required this.onPdf,
@@ -504,7 +507,7 @@ class LedgerlyDocumentRow extends StatelessWidget {
 }
 
 class LedgerlyStatusPill extends StatelessWidget {
-  const LedgerlyStatusPill({required this.label, required this.color});
+  const LedgerlyStatusPill({super.key, required this.label, required this.color});
   final String label;
   final Color color;
 
@@ -525,6 +528,7 @@ class LedgerlyStatusPill extends StatelessWidget {
 
 class LedgerlyEmptyState extends StatelessWidget {
   const LedgerlyEmptyState({
+    super.key,
     required this.icon,
     required this.title,
     required this.message,
