@@ -326,4 +326,29 @@ void main() {
     expect((await store.load()).single.id, 'legacy-valid');
   });
 
+  test('partial snapshots are rejected without replacing existing bytes',
+      () async {
+    const partial = '{"version":1,"documents":[],"payments":[]}';
+    SharedPreferences.setMockInitialValues({
+      'ledgerly.workspace.snapshot.v1': partial,
+    });
+    final store = DocumentStore();
+
+    await expectLater(store.load(), throwsA(isA<FormatException>()));
+    await expectLater(store.save([makeInvoice('new-invoice')]),
+        throwsA(isA<FormatException>()));
+
+    final prefs = await SharedPreferences.getInstance();
+    expect(prefs.getString('ledgerly.workspace.snapshot.v1'), partial);
+  });
+
+  test('business profile saves reject unsupported currencies', () async {
+    final store = DocumentStore();
+    await expectLater(
+      store.saveProfile(BusinessProfile(currencyCode: 'XYZ')),
+      throwsA(isA<FormatException>()),
+    );
+    expect((await store.loadProfile()).currencyCode, 'ZAR');
+  });
+
 }
