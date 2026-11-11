@@ -264,9 +264,27 @@ class _HomeScreenState extends State<HomeScreen> {
   Future<Uint8List> _makePdf(BusinessDocument doc) async {
     final pdf = pw.Document();
     final currency = doc.currencyCode;
-    final docPayments = _payments.where((p) => p.invoiceId == doc.id).toList();
-    final totalPaid = docPayments.fold(0.0, (sum, p) => sum + p.amount);
-    final remaining = (doc.total - totalPaid).clamp(0.0, double.infinity);
+    final docPayments = _payments
+        .where((payment) => payment.invoiceId == doc.id)
+        .toList()
+      ..sort((a, b) => b.paymentDate.compareTo(a.paymentDate));
+    if (doc.kind != DocumentKind.invoice && docPayments.isNotEmpty) {
+      throw const FormatException('Quotes cannot contain recorded invoice payments.');
+    }
+    if (docPayments.any((payment) =>
+        !payment.amount.isFinite ||
+        payment.amount <= 0 ||
+        roundMoney(payment.amount) != payment.amount)) {
+      throw const FormatException('This document has invalid payment records.');
+    }
+    final totalPaid =
+        roundMoney(docPayments.fold(0.0, (sum, payment) => sum + payment.amount));
+    if (totalPaid > doc.total + 0.004) {
+      throw const FormatException(
+          'Recorded payments exceed this invoice total. Correct the payment records before creating a PDF.');
+    }
+    final remaining =
+        (doc.total - totalPaid).clamp(0.0, double.infinity).toDouble();
 
     // Find matching customer details
     Customer? matchedCustomer;
@@ -479,10 +497,10 @@ class _HomeScreenState extends State<HomeScreen> {
             children: [
               _navyTotalRow(
                   'Subtotal', CurrencyHelper.format(doc.subtotal, currency)),
-              if (doc.discount > 0)
+              if (doc.safeDiscount > 0)
                 _navyTotalRow('Discount',
-                    '-${CurrencyHelper.format(doc.discount, currency)}'),
-              _navyTotalRow('Sales Tax (${doc.taxPercent.toStringAsFixed(1)}%)',
+                    '-${CurrencyHelper.format(doc.safeDiscount, currency)}'),
+              _navyTotalRow('Sales Tax (${doc.safeTaxPercent.toStringAsFixed(1)}%)',
                   CurrencyHelper.format(doc.taxAmount, currency)),
               pw.Divider(color: PdfColors.grey600, height: 10),
               _navyTotalRow('Total Amount Due',
