@@ -121,10 +121,11 @@ class DocumentStore {
       };
     } else {
       final decoded = jsonDecode(snapshotSource);
-      if (decoded is! Map<String, dynamic> || decoded['version'] != 1) {
+      if (decoded is! Map<String, dynamic>) {
         throw const FormatException('Saved workspace snapshot is invalid.');
       }
       snapshot = Map<String, dynamic>.from(decoded);
+      _validateSnapshot(snapshot);
     }
     snapshot['documents'] =
         documents.map((document) => document.toJson()).toList();
@@ -142,6 +143,11 @@ class DocumentStore {
   }
 
   Future<void> saveProfile(BusinessProfile profile) async {
+    if (!CurrencyHelper.currencies.any(
+        (currency) => currency.code == profile.currencyCode.toUpperCase())) {
+      throw FormatException(
+          'Unsupported business profile currency: ' + profile.currencyCode + '.');
+    }
     await _saveValue(_profileKey, 'profile', profile.encode());
   }
 
@@ -150,9 +156,10 @@ class DocumentStore {
     final snapshotSource = prefs.getString(_snapshotKey);
     if (snapshotSource == null) return prefs.getString(legacyKey);
     final decoded = jsonDecode(snapshotSource);
-    if (decoded is! Map<String, dynamic> || decoded['version'] != 1) {
+    if (decoded is! Map<String, dynamic>) {
       throw const FormatException('Saved workspace snapshot is invalid.');
     }
+    _validateSnapshot(decoded);
     if (!decoded.containsKey(section)) {
       throw FormatException('Saved workspace snapshot is missing "$section".');
     }
@@ -168,9 +175,10 @@ class DocumentStore {
       return;
     }
     final decoded = jsonDecode(snapshotSource);
-    if (decoded is! Map<String, dynamic> || decoded['version'] != 1) {
+    if (decoded is! Map<String, dynamic>) {
       throw const FormatException('Saved workspace snapshot is invalid.');
     }
+    _validateSnapshot(decoded);
     decoded[section] = jsonDecode(value);
     if (!await prefs.setString(_snapshotKey, jsonEncode(decoded))) {
       throw StateError(
@@ -328,6 +336,34 @@ class DocumentStore {
     final prefs = await SharedPreferences.getInstance();
     if (!await prefs.setString(_snapshotKey, jsonEncode(snapshot))) {
       throw StateError('Could not atomically restore Ledgerly workspace data.');
+    }
+  }
+
+  void _validateSnapshot(Map<String, dynamic> snapshot) {
+    if (snapshot['version'] != 1) {
+      throw const FormatException(
+          'Saved workspace snapshot has an unsupported version.');
+    }
+    const requiredSections = [
+      'documents',
+      'customers',
+      'items',
+      'payments',
+      'profile',
+    ];
+    for (final section in requiredSections) {
+      if (!snapshot.containsKey(section)) {
+        throw FormatException(
+            'Saved workspace snapshot is missing "$section".');
+      }
+    }
+    if (snapshot['documents'] is! List ||
+        snapshot['customers'] is! List ||
+        snapshot['items'] is! List ||
+        snapshot['payments'] is! List ||
+        snapshot['profile'] is! Map<String, dynamic>) {
+      throw const FormatException(
+          'Saved workspace snapshot contains an invalid section.');
     }
   }
 
