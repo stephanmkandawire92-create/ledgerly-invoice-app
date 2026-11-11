@@ -10,6 +10,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('Business overview'), findsOneWidget);
     expect(find.text('Your workspace is ready'), findsOneWidget);
+    expect(find.textContaining('Cloud sync is not available'), findsOneWidget);
     expect(find.text('Northstar Studio'), findsNothing);
   });
 }
