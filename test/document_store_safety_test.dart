@@ -342,12 +342,15 @@ void main() {
     expect(prefs.getString('ledgerly.workspace.snapshot.v1'), partial);
   });
 
-  test('business profile saves reject unsupported currencies', () async {
+  test('business profile saves reject unsupported currencies without replacing saved profile', () async {
     final store = DocumentStore();
+    await store.saveProfile(BusinessProfile(currencyCode: 'ZAR'));
+
     await expectLater(
       store.saveProfile(BusinessProfile(currencyCode: 'XYZ')),
       throwsA(isA<FormatException>()),
     );
+
     expect((await store.loadProfile()).currencyCode, 'ZAR');
   });
 
