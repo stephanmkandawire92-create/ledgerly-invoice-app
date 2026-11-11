@@ -127,6 +127,7 @@ class DocumentStore {
       snapshot = Map<String, dynamic>.from(decoded);
       _validateSnapshot(snapshot);
     }
+    _validateSnapshot(snapshot);
     snapshot['documents'] =
         documents.map((document) => document.toJson()).toList();
     snapshot['payments'] = payments.map((payment) => payment.toJson()).toList();
@@ -263,6 +264,11 @@ class DocumentStore {
     }
     final profile =
         BusinessProfile.fromJson(data['profile'] as Map<String, dynamic>);
+    if (!CurrencyHelper.currencies.any(
+        (currency) => currency.code == profile.currencyCode.toUpperCase())) {
+      throw const FormatException(
+          'Backup contains an unsupported business profile currency.');
+    }
 
     _ensureUniqueIds(docs.map((e) => e.id), 'documents');
     _ensureUniqueIds(customers.map((e) => e.id), 'customers');
@@ -333,6 +339,7 @@ class DocumentStore {
       'profile': profile.toJson(),
     };
 
+    _validateSnapshot(snapshot);
     final prefs = await SharedPreferences.getInstance();
     if (!await prefs.setString(_snapshotKey, jsonEncode(snapshot))) {
       throw StateError('Could not atomically restore Ledgerly workspace data.');
