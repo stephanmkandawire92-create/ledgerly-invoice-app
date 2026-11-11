@@ -73,6 +73,24 @@ Preserve:
 ### Phase 7 — Release verification
 Run all Flutter, Deno and SQL commands on the release-candidate branch. Record exact versions, commands, exit codes, test counts and any environment blockers. Complete manual visual/device checks at all four viewport sizes and sandbox billing checks before release.
 
+## Work completed on release-candidate branch
+
+- [x] Removed embedded production Supabase URL and publishable key defaults; local-only startup remains possible.
+- [x] Removed tracked Flutter `build/` output (41 tree entries, including large compiler caches) and tracked IDE-specific `.idea/` files. Existing ignore rules cover both.
+- [x] Added normal-save validation for duplicate document/payment/customer/item IDs, duplicate document numbers, supported document/profile currencies, invalid amounts/tax/discount/quantity values, due dates before issue dates, orphan payments and overpayments.
+- [x] Made payment-only saves use the same atomic documents/payments snapshot path.
+- [x] Added complete snapshot-shape validation before workspace reads/writes and backup restore; corruption/partial snapshots fail closed.
+- [x] Added isolated tests for duplicate IDs/numbers, unsupported currency, invalid line values, orphan/duplicate payments, legacy migration, partial snapshots and profile currency.
+- [x] Added PDF preflight rejection for invalid or over-total payment records so exports cannot misstate paid/balance amounts.
+- [x] Added local-only/no-cloud-sync notice translations for English, Spanish, French, German, Portuguese, Arabic and Chinese; shown on the overview screen.
+- [x] Reworked README to state actual Web/Windows host support, Android/iOS absence, local storage behavior, plaintext backup risks, privacy-sensitive fields, subscription terms and release gates.
+- [x] Hardened RevenueCat entitlement mapping: only recognized event types are processed, account IDs must be canonical UUIDs, and active grants require a provider-confirmed future expiry (or grace expiry). Added Deno unit tests.
+- [x] Hardened PayPal payment evidence to require a valid provider payment timestamp; completed-sale events derive a bounded period from the verified event timestamp when needed. Added Deno unit tests.
+- [x] GitHub Actions Billing checks passed at commit `d8bd07dfd106912ec94e90c22fab2ce79f1e4ada` (Deno lint/tests). PostgreSQL SQL checks and Flutter CI were running on the subsequent PR commit at last inspection.
+- [ ] The home screen is still a large module (approximately 2,775 lines); decomposition and dedicated PDF service extraction remain.
+- [ ] Complete full visible-string localization, accessibility audit and viewport testing.
+- [ ] Run/verify Flutter analyze, Flutter tests and Web release build; complete PDF fixture/manual checks.
+
 ## Risks and gates
 
 - Do not deploy migrations, Edge Functions, secrets or live billing changes as part of a source-only release-candidate branch.
