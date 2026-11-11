@@ -59,7 +59,7 @@ Deno.serve(async (req) => {
       return json({ received: true, ignored: true });
     }
 
-    let decision;
+    let decision: ReturnType<typeof decideRevenueCatEntitlement>;
     try {
       decision = decideRevenueCatEntitlement({
         type,
