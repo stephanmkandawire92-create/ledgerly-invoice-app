@@ -27,8 +27,6 @@ import 'paywall_screen.dart';
 
 const _brand = Color(0xFF4F46E5);
 const _ink = Color(0xFF172033);
-const _muted = Color(0xFF7B8497);
-const _line = Color(0xFFE9ECF3);
 
 String dateLabel(DateTime date) => DateFormat('d MMM yyyy').format(date);
 
