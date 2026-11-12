@@ -1,17 +1,38 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.118.0";
 import { decideRevenueCatEntitlement, isLedgerlyAccountId } from "../_shared/revenuecat.ts";
 
+type RevenueCatEventQuery = {
+  eq: (column: string, value: string) => RevenueCatEventQuery;
+  maybeSingle: () => Promise<{ data: { event_id: string } | null; error: { message?: string } | null }>;
+};
+
+type RevenueCatAdmin = {
+  from: (table: string) => {
+    select: (columns: string) => RevenueCatEventQuery;
+    insert: (row: Record<string, unknown>) => Promise<{ error: { code?: string; message?: string } | null }>;
+  };
+  rpc: (name: string, args: Record<string, unknown>) => Promise<{ error: { message?: string } | null }>;
+};
+
+type RevenueCatWebhookDependencies = {
+  env: (name: string) => string | undefined;
+  createAdmin: (url: string, serviceKey: string) => RevenueCatAdmin;
+};
+
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), {
   status,
   headers: { "Content-Type": "application/json" },
 });
 
-Deno.serve(async (req) => {
+export async function handleRevenueCatWebhook(
+  req: Request,
+  dependencies: RevenueCatWebhookDependencies,
+): Promise<Response> {
   if (req.method !== "POST") return json({ error: "Method not allowed" }, 405);
 
-  const expected = Deno.env.get("REVENUECAT_WEBHOOK_AUTH");
-  const url = Deno.env.get("SUPABASE_URL");
-  const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+  const expected = dependencies.env("REVENUECAT_WEBHOOK_AUTH");
+  const url = dependencies.env("SUPABASE_URL");
+  const serviceKey = dependencies.env("SUPABASE_SERVICE_ROLE_KEY");
   if (!expected || !url || !serviceKey) {
     return json({ error: "Webhook not configured" }, 503);
   }
@@ -33,7 +54,7 @@ Deno.serve(async (req) => {
       return json({ error: "Unknown Ledgerly account reference" }, 400);
     }
 
-    const admin = createClient(url, serviceKey, { auth: { persistSession: false } });
+    const admin = dependencies.createAdmin(url, serviceKey);
     const { data: existing, error: duplicateCheckError } = await admin
       .from("billing_webhook_events")
       .select("event_id")
@@ -59,11 +80,12 @@ Deno.serve(async (req) => {
       return json({ received: true, ignored: true });
     }
 
+    const eventTimestampMs = Number(event.event_timestamp_ms);
     let decision: ReturnType<typeof decideRevenueCatEntitlement>;
     try {
       decision = decideRevenueCatEntitlement({
         type,
-        eventTimestampMs: Number(event.event_timestamp_ms),
+        eventTimestampMs,
         expirationAtMs: event.expiration_at_ms == null
           ? null
           : Number(event.expiration_at_ms),
@@ -88,6 +110,7 @@ Deno.serve(async (req) => {
     }
     const status = decision.status;
     const periodEnd = decision.periodEnd;
+    const eventDate = new Date(eventTimestampMs);
 
     const originalId = event.original_transaction_id ?? event.transaction_id ?? eventId;
     const externalId = String(originalId);
@@ -117,4 +140,13 @@ Deno.serve(async (req) => {
     console.error("RevenueCat webhook error", error);
     return json({ error: "Webhook processing failed" }, 500);
   }
-});
+}
+
+if (import.meta.main) {
+  Deno.serve((req) => handleRevenueCatWebhook(req, {
+    env: (name) => Deno.env.get(name),
+    createAdmin: (url, serviceKey) => createClient(url, serviceKey, {
+      auth: { persistSession: false },
+    }) as unknown as RevenueCatAdmin,
+  }));
+}
