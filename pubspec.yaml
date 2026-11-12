@@ -22,5 +22,14 @@ dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^5.0.0
+  msix: ^3.16.0
+
 flutter:
   uses-material-design: true
+
+msix_config:
+  display_name: Ledgerly
+  publisher_display_name: Ledgerly Inc
+  identity_name: Ledgerly.InvoicesPro
+  msix_version: 1.0.0.0
+  capabilities: internetClient
