@@ -23,6 +23,7 @@ dev_dependencies:
     sdk: flutter
   flutter_lints: ^5.0.0
   msix: ^3.16.0
+  flutter_launcher_icons: ^0.13.1
 
 flutter:
   uses-material-design: true
@@ -33,3 +34,14 @@ msix_config:
   identity_name: Ledgerly.InvoicesPro
   msix_version: 1.0.0.0
   capabilities: internetClient
+
+flutter_launcher_icons:
+  image_path: "assets/icon/ledgerly_icon.png"
+  android: false
+  ios: false
+  windows:
+    generate: true
+    image_path: "assets/icon/ledgerly_icon.png"
+  web:
+    generate: true
+    image_path: "assets/icon/ledgerly_icon.png"
