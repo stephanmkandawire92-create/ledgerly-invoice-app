@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 300" role="img" aria-labelledby="title desc">
+<title id="title">Ledgerly</title><desc id="desc">Ledgerly invoices, payments and business logo.</desc>
+<defs>
+ <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#101A36"/><stop offset="1" stop-color="#2469B8"/></linearGradient>
+ <linearGradient id="gold" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#FFE7A0"/><stop offset="1" stop-color="#D99A27"/></linearGradient>
+</defs>
+<rect x="8" y="8" width="284" height="284" rx="66" fill="url(#bg)"/>
+<path d="M82 226V92c0-13 11-24 24-24h20M82 226h108" fill="none" stroke="#fff" stroke-width="20" stroke-linecap="round"/>
+<path d="M72 62c39-34 91-45 141-32 25 7 48 20 65 39" fill="none" stroke="url(#gold)" stroke-width="12" stroke-linecap="round"/>
+<path d="M155 104h68l24 24v106h-92z" fill="#f5f8fd"/>
+<path d="M223 104v25h24" fill="#d5e1f1"/>
+<rect x="173" y="173" width="12" height="42" rx="4" fill="#3978c9"/><rect x="192" y="157" width="12" height="58" rx="4" fill="#2d67b4"/><rect x="211" y="141" width="12" height="74" rx="4" fill="#194a91"/>
+<circle cx="250" cy="221" r="24" fill="url(#gold)" stroke="#fff0c7" stroke-width="3"/>
+<path d="M257 209c-7-7-20-4-20 4 0 6 5 8 13 10 8 2 12 5 12 11 0 7-8 11-15 10-6 0-12-3-15-7" fill="none" stroke="#805312" stroke-width="4" stroke-linecap="round"/>
+<text x="340" y="154" font-family="Inter, Arial, sans-serif" font-size="104" font-weight="750" letter-spacing="-5" fill="#14213D">Ledgerly</text>
+<text x="347" y="208" font-family="Inter, Arial, sans-serif" font-size="25" font-weight="650" letter-spacing="5" fill="#53647F">INVOICES  •  PAYMENTS  •  BUSINESS</text>
+<path d="M348 238h145" stroke="url(#gold)" stroke-width="8" stroke-linecap="round"/>
+</svg>
