@@ -1,0 +1,25 @@
+{
+  "manifest_version": 3,
+  "name": "Ledgerly — Invoices & Quotes",
+  "short_name": "Ledgerly",
+  "version": "1.0.0",
+  "description": "Professional offline-first invoicing, quotations, client directory, and financial analytics for Microsoft Edge.",
+  "default_locale": "en",
+  "permissions": [
+    "storage",
+    "unlimitedStorage"
+  ],
+  "action": {
+    "default_popup": "index.html",
+    "default_icon": {
+      "16": "icons/Icon-192.png",
+      "48": "icons/Icon-192.png",
+      "128": "icons/Icon-512.png"
+    }
+  },
+  "icons": {
+    "16": "icons/Icon-192.png",
+    "48": "icons/Icon-192.png",
+    "128": "icons/Icon-512.png"
+  }
+}
