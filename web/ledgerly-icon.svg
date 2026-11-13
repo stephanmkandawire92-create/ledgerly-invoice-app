@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-labelledby="title desc">
+  <title id="title">Ledgerly app icon</title>
+  <desc id="desc">A white Ledgerly letterform and invoice sheet with rising blue bars and a gold accent on a deep navy gradient.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#101A36"/><stop offset=".55" stop-color="#173B78"/><stop offset="1" stop-color="#2469B8"/></linearGradient>
+    <linearGradient id="gold" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#FFE7A0"/><stop offset="1" stop-color="#D99A27"/></linearGradient>
+    <linearGradient id="paper" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#FFFFFF"/><stop offset="1" stop-color="#EAF0FA"/></linearGradient>
+    <filter id="shadow" x="-30%" y="-30%" width="160%" height="160%"><feDropShadow dx="0" dy="12" stdDeviation="12" flood-color="#061126" flood-opacity=".32"/></filter>
+  </defs>
+  <rect width="512" height="512" rx="112" fill="url(#bg)"/>
+  <path d="M73 364C112 421 191 449 272 431c76-17 128-70 157-141" fill="none" stroke="#5F91D5" stroke-opacity=".22" stroke-width="7" stroke-linecap="round"/>
+  <g filter="url(#shadow)">
+    <path d="M147 90h169l65 65v238H147z" fill="url(#paper)"/>
+    <path d="M316 90v66h65" fill="#D8E3F3"/>
+    <path d="M178 191h105" stroke="#A9B9D0" stroke-width="12" stroke-linecap="round"/>
+    <path d="M178 222h75" stroke="#C1CCDC" stroke-width="9" stroke-linecap="round"/>
+    <rect x="178" y="264" width="26" height="79" rx="8" fill="#3978C9"/>
+    <rect x="219" y="239" width="26" height="104" rx="8" fill="#2D67B4"/>
+    <rect x="260" y="211" width="26" height="132" rx="8" fill="#194A91"/>
+    <path d="M177 364h146" stroke="#D0D9E6" stroke-width="9" stroke-linecap="round"/>
+  </g>
+  <path d="M118 372V170c0-19 15-34 34-34h30" fill="none" stroke="#FFFFFF" stroke-width="30" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M118 372h151" fill="none" stroke="#FFFFFF" stroke-width="30" stroke-linecap="round"/>
+  <path d="M104 122c46-44 111-62 174-49 38 8 72 27 98 55" fill="none" stroke="url(#gold)" stroke-width="17" stroke-linecap="round"/>
+  <circle cx="365" cy="354" r="47" fill="url(#gold)" stroke="#FFF0C7" stroke-width="5"/>
+  <path d="M379 329c-7-8-17-11-27-8-10 3-16 10-16 19 0 11 9 16 23 20 14 4 22 9 22 20 0 10-9 18-21 20-12 2-23-2-31-11M365 309v92" fill="none" stroke="#805312" stroke-width="7" stroke-linecap="round"/>
+</svg>
